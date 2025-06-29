@@ -26,28 +26,29 @@
             mix-blend-mode: difference;
             border-radius: 50%;
             z-index: 10;
+            display: none; /* Hidden by default, shown when in game */
         }
         #blocker {
             position: absolute;
             width: 100%;
             height: 100%;
             background-color: rgba(0,0,0,0.8);
-            display: flex;
+            display: flex; /* Flexbox for centering content */
             flex-direction: column;
             justify-content: center;
             align-items: center;
             color: white;
             font-size: 2rem;
             text-align: center;
-            z-index: 1000;
+            z-index: 1000; /* High z-index to be on top */
             transition: opacity 0.5s ease-in-out;
         }
         #blocker.hidden {
             opacity: 0;
-            pointer-events: none;
+            pointer-events: none; /* Allow clicks to pass through when hidden */
         }
         #title-screen-content {
-            display: flex;
+            display: flex; /* Initially visible */
             flex-direction: column;
             align-items: center;
             gap: 20px;
@@ -56,14 +57,16 @@
             border-radius: 15px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
             max-width: 80%;
+            max-height: 90vh; /* Make menu scrollable */
+            overflow-y: auto; /* Enable vertical scrolling */
         }
         #loading-screen-content {
-            display: none; /* Hidden by default */
+            display: none; /* Hidden by default, shown during world generation */
             flex-direction: column;
             align-items: center;
             gap: 20px;
             position: absolute;
-            inset: 0;
+            inset: 0; /* Cover the entire screen */
             background-color: rgba(0,0,0,0.7);
         }
         #start-button {
@@ -76,23 +79,16 @@
             cursor: pointer;
             transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
             box-shadow: 0 6px 12px rgba(0,0,0,0.4);
-            pointer-events: none; /* Disabled until world loads */
-            opacity: 0.6;
+            pointer-events: auto; /* Always enabled for click-to-start */
+            opacity: 1;
             text-transform: uppercase;
             letter-spacing: 1px;
             font-weight: bold;
         }
-        #start-button.active {
+        #start-button:hover {
             background-color: #45a049;
             transform: translateY(-4px);
-            pointer-events: auto;
-            opacity: 1;
             box-shadow: 0 8px 16px rgba(0,0,0,0.6);
-        }
-        #start-button:hover.active {
-            background-color: #3e8e41;
-            transform: translateY(-6px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.8);
         }
 
         #toolbar {
@@ -107,6 +103,7 @@
             border-radius: 10px;
             border: 2px solid rgba(255,255,255,0.4);
             z-index: 50;
+            display: none; /* Hidden by default, shown when in game */
         }
         .toolbar-slot {
             width: 60px;
@@ -122,10 +119,19 @@
             transform: scale(1.1);
             box-shadow: 0 0 15px rgba(255,255,255,0.7);
         }
-        canvas {
-            display: block;
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: 100%;
+            height: 100vh;
+            display: none; /* Hidden by default, shown when game is active */
+            z-index: 5; /* Below blocker, above body background */
+        }
+        #game-container canvas {
+            display: block; /* Ensure it's a block element */
+            width: 100%;
+            height: 100vh; /* Make sure it takes full viewport height */
         }
         #interaction-prompt {
             position: absolute;
@@ -224,7 +230,8 @@
         <div id="title-screen-content">
             <h1 class="text-6xl font-bold mb-4 text-emerald-300 drop-shadow-lg">BlockCrafter</h1>
             <p class="text-2xl text-gray-200">A Creative Voxel Experience</p>
-            <button id="start-button">Start Game</button>
+            <!-- The start button's text will be updated by JavaScript -->
+            <button id="start-button">Click to Enter World</button> 
             <div class="text-sm mt-8 max-w-md mx-auto text-gray-300">
                 <p class="font-bold text-lg mb-2 text-white">Controls</p>
                 <p><strong>W, A, S, D</strong>: Move</p>
@@ -243,11 +250,13 @@
         </div>
     </div>
     
-    <div id="crosshair"></div>
-
-    <div id="interaction-prompt" class="rounded-lg">Press E to Interact</div>
-
-    <div id="toolbar"></div>
+    <!-- New game container to hold all in-game elements -->
+    <div id="game-container">
+        <!-- Canvas for Three.js rendering will be appended here by JavaScript -->
+        <div id="crosshair"></div>
+        <div id="interaction-prompt" class="rounded-lg">Press E to Interact</div>
+        <div id="toolbar"></div>
+    </div>
 
     <div id="dialogue-box">
         <h3 class="text-2xl font-bold">NPC Dialogue ✨</h3>
@@ -312,6 +321,10 @@
         const dialogueCloseButton = document.getElementById('dialogue-close-button');
         const dialogueLoadingIndicator = document.getElementById('dialogue-loading-indicator');
         const suggestIdeaButton = document.getElementById('suggest-idea-button');
+        const crosshair = document.getElementById('crosshair');
+        const toolbar = document.getElementById('toolbar');
+        const gameContainer = document.getElementById('game-container'); // New reference to game container
+
 
         // Initialize the game when the window loads
         window.onload = function() {
@@ -353,8 +366,9 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true; // Enable shadow mapping
-            document.body.appendChild(renderer.domElement); // Add renderer to DOM
-            console.log("init(): Renderer attached to DOM.");
+            // Append renderer to the game-container, not body directly
+            gameContainer.appendChild(renderer.domElement); 
+            console.log("init(): Renderer attached to game-container.");
 
             // Setup Lighting
             const ambientLight = new THREE.AmbientLight(0xcccccc); // Soft ambient light
@@ -388,30 +402,54 @@
             scene.add(rollOverMesh);
             console.log("init(): Raycaster and rollover mesh set up.");
 
-            // Setup the title screen and initiate background world generation
-            setupTitleScreen();
-            startWorldGeneration(); // Start world generation as soon as init is done
-            console.log("init(): Title screen and initial world generation initiated.");
+            // Initiate background world generation and handle start button display
+            setupInitialStartScreen(); // Sets up the initial state and then starts world generation.
+            console.log("init(): Initial start screen setup and world generation initiated.");
 
             // Add window resize listener
             window.addEventListener('resize', onWindowResize, false);
             console.log("init(): Window resize listener added. Initialization complete.");
         }
 
-        // Sets up the functionality for the "Start Game" button
-        function setupTitleScreen() {
-            startButton.addEventListener('click', () => {
-                console.log("Start button clicked.");
-                // Only proceed if the button is active (meaning world generation is complete)
-                if (startButton.classList.contains('active')) {
-                    console.log("Start button is active. Requesting pointer lock.");
-                    // Request pointer lock directly. The pointerlockchange event will handle UI updates.
-                    renderer.domElement.requestPointerLock();
-                } else {
-                    console.log("Start button is not active yet (world generation in progress).");
+        // Manages the initial display state and triggers world generation
+        function setupInitialStartScreen() {
+            // Ensure blocker is visible and gameContainer is hidden
+            blocker.classList.remove('hidden');
+            gameContainer.style.display = 'none';
+
+            titleScreenContent.style.display = 'none'; // Hide title content initially
+            loadingScreenContent.style.display = 'flex'; // Show loading screen
+            startButton.textContent = 'Generating World...'; // Indicate loading state
+            startButton.style.pointerEvents = 'none'; // Disable button during loading
+            startButton.style.opacity = '0.6';
+
+            // Start world generation immediately
+            startWorldGeneration().then(() => {
+                // Once world is generated, hide loading screen and show title screen with active button
+                loadingScreenContent.style.display = 'none';
+                titleScreenContent.style.display = 'flex';
+                startButton.textContent = 'Click to Enter World';
+                startButton.style.pointerEvents = 'auto'; // Enable button
+                startButton.style.opacity = '1';
+                console.log("setupInitialStartScreen(): World generated, start button active.");
+            });
+            
+            // Add a click listener to the *startButton* (or the whole blocker) to capture pointer lock
+            // This ensures a user-initiated click which is required by browsers for pointer lock.
+            startButton.addEventListener('click', async () => {
+                console.log("Start button clicked. Attempting to request pointer lock.");
+                try {
+                    // Request pointer lock on the renderer's DOM element (the canvas)
+                    await renderer.domElement.requestPointerLock();
+                    console.log("Pointer lock request sent from start button click.");
+                    // The pointerlockchange event will now handle UI updates and player.canMove
+                } catch (error) {
+                    console.error("Error requesting pointer lock from start button click:", error);
+                    appendDialogue("Failed to gain mouse control: Browser might require a direct click on the game area or other interaction.");
                 }
             });
         }
+
 
         // Handles the asynchronous generation of the game world
         async function startWorldGeneration() {
@@ -435,13 +473,10 @@
             }
             console.log("startWorldGeneration(): Existing chunks cleared from scene and memory.");
 
-            // Display the loading screen and disable the start button
-            titleScreenContent.style.display = 'none'; // Hide title screen controls
-            loadingScreenContent.style.display = 'flex'; // Show loading animation
-            startButton.classList.remove('active'); // Disable button during loading
-            startButton.textContent = 'Generating World...'; // Update button text
             player.canMove = false; // Player cannot move during generation
-            console.log("startWorldGeneration(): Displaying loading screen, disabling start button.");
+            crosshair.style.display = 'none'; // Hide crosshair during loading/menu
+            toolbar.style.display = 'none'; // Hide toolbar during loading/menu
+            console.log("startWorldGeneration(): Ensuring game UI is hidden.");
 
             // Allow the UI to update visually before starting heavy computation
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -462,12 +497,7 @@
             }
             console.log("startWorldGeneration(): All initial chunks generated.");
 
-            // Hide loading screen, show title screen, and activate start button
-            loadingScreenContent.style.display = 'none'; // Hide loading animation
-            titleScreenContent.style.display = 'flex'; // Show title screen controls again
-            startButton.classList.add('active'); // Enable the start button
-            startButton.textContent = 'Enter World';
-            console.log("startWorldGeneration(): World generation complete. Start button activated. Ready to play.");
+            // This function is now only responsible for generation. UI updates are handled by setupInitialStartScreen
         }
 
 
@@ -478,20 +508,28 @@
             document.addEventListener('pointerlockchange', () => {
                 if (document.pointerLockElement === renderer.domElement) {
                     // Pointer lock acquired: enter game mode
-                    console.log("pointerlockchange: Pointer lock acquired. Hiding blocker, enabling movement.");
+                    console.log("pointerlockchange: Pointer lock acquired. Hiding blocker, showing gameContainer, enabling movement, showing game UI.");
                     blocker.classList.add('hidden'); // Hide the menu blocker
+                    gameContainer.style.display = 'block'; // Show the game container
                     player.canMove = true; // Enable player movement
+                    crosshair.style.display = 'block'; // Show crosshair
+                    toolbar.style.display = 'flex'; // Show toolbar
                 } else {
                     // Pointer lock lost: return to menu mode
-                    console.log("pointerlockchange: Pointer lock lost. Showing blocker, disabling movement.");
+                    console.log("pointerlockchange: Pointer lock lost. Showing blocker, hiding gameContainer, disabling movement, hiding game UI.");
                     blocker.classList.remove('hidden'); // Show the menu blocker
+                    gameContainer.style.display = 'none'; // Hide the game container
+                    player.canMove = false; // Disable player movement
+                    crosshair.style.display = 'none'; // Hide crosshair
+                    toolbar.style.display = 'none'; // Hide toolbar
+                    
                     // Only re-initiate world generation if not already in dialogue (which would prevent pointer lock)
                     if (!isDialogueOpen) {
                         titleScreenContent.style.display = 'flex';
                         loadingScreenContent.style.display = 'none'; // Ensure loading screen is hidden
-                        startButton.classList.remove('active'); // Deactivate button
-                        startButton.textContent = 'Start Game'; // Reset button text
-                        player.canMove = false; // Disable player movement
+                        startButton.textContent = 'Click to Enter World'; // Update button text
+                        startButton.style.pointerEvents = 'auto'; // Enable button
+                        startButton.style.opacity = '1';
                         // Re-trigger world generation for a clean state on next play
                         startWorldGeneration(); 
                     } else {
@@ -1243,6 +1281,8 @@
             } else if (document.pointerLockElement !== renderer.domElement && player.canMove) {
                 // Fallback: if player.canMove is true but pointer lock is lost, correct the state
                 player.canMove = false;
+                crosshair.style.display = 'none'; // Hide crosshair
+                toolbar.style.display = 'none'; // Hide toolbar
                 console.log("animate(): Player movement disabled due to detected pointer lock discrepancy. State corrected.");
             }
             
