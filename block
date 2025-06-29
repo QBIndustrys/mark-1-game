@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- Chosen Palette: Earthy Tones -->
+    <!-- Application Structure Plan: A single-screen game experience. The main area is the 3D world canvas. Overlaid UI elements include a crosshair for aiming, a block selection toolbar, and an instructions panel. This structure is chosen for immediate immersion into the game, with essential controls readily accessible, mirroring standard first-person sandbox game conventions for intuitive user interaction. -->
+    <!-- Visualization & Content Choices: The primary visualization is the 3D voxel world itself, rendered using three.js on a Canvas element. The goal is exploration and creation. The core interactions are moving (WASD/Arrow Keys), jumping (Space), destroying blocks (left-click), and placing blocks (right-right-click), and placing blocks (right-click). This directly translates the core "Minecraft-like" concept from the report into a functional application. The world is generated procedurally using a noise algorithm to create interesting, explorable terrain, which is a key mechanic discussed in the source material. Added an LLM-powered NPC for dialogue and story generation, enhancing user engagement by providing dynamic interactions and contextual information within the game world. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <title>BlockCrafter - Web Voxel Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Updated CDN link for BufferGeometryUtils to a version compatible with global THREE -->
+    <script src="https://threejs.org/examples/js/utils/BufferGeometryUtils.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #87ceeb; /* Sky blue background */
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            border: 2px solid white;
+            transform: translate(-50%, -50%);
+            mix-blend-mode: difference;
+            border-radius: 50%;
+        }
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 2rem;
+            text-align: center;
+            cursor: pointer;
+        }
+        #toolbar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            background-color: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,0.4);
+        }
+        .toolbar-slot {
+            width: 60px;
+            height: 60px;
+            background-size: cover;
+            border: 3px solid #555;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            image-rendering: pixelated;
+        }
+        .toolbar-slot.active {
+            border-color: #fff;
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(255,255,255,0.7);
+        }
+        canvas {
+            display: block;
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 300px;
+            font-size: 0.9rem;
+            z-index: 100;
+        }
+        #interaction-prompt {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 1rem;
+            display: none; /* Hidden by default */
+            z-index: 100;
+        }
+        #dialogue-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 600px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            gap: 15px;
+            z-index: 200;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        #dialogue-box.active {
+            opacity: 1;
+            display: flex;
+        }
+        #dialogue-content {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 1rem;
+            line-height: 1.5;
+        }
+        #dialogue-input-container {
+            display: flex;
+            gap: 10px;
+        }
+        #dialogue-input {
+            flex-grow: 1;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 1rem;
+            outline: none;
+        }
+        #dialogue-input::placeholder {
+            color: rgba(255,255,255,0.6);
+        }
+        #dialogue-send-button, #dialogue-close-button {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+        #dialogue-send-button:hover, #dialogue-close-button:hover {
+            background-color: #45a049;
+            transform: translateY(-1px);
+        }
+        #dialogue-close-button {
+            background-color: #f44336;
+        }
+        #dialogue-close-button:hover {
+            background-color: #da190b;
+        }
+        #dialogue-loading-indicator {
+            text-align: center;
+            font-size: 1rem;
+            color: #add8e6;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="blocker">
+        <div>
+            <h1 class="text-4xl font-bold mb-4">BlockCrafter</h1>
+            <p class="text-xl">Click to start</p>
+            <div class="text-sm mt-8 max-w-md mx-auto">
+                <p><strong>Controls:</strong></p>
+                <p><strong>W, A, S, D:</strong> Move</p>
+                <p><strong>Mouse:</strong> Look</p>
+                <p><strong>Space:</strong> Jump</p>
+                <p><strong>Left Click:</strong> Destroy Block</p>
+                <p><strong>Right Click:</strong> Place Block</p>
+                <p><strong>1-5 Keys:</strong> Select Block</p>
+                <p><strong>E:</strong> Interact with NPC</p>
+                <p><strong>ESC:</strong> Release mouse</p>
+            </div>
+        </div>
+    </div>
+    
+    <div id="crosshair"></div>
+
+    <div id="instructions">
+        <h2 class="font-bold text-lg mb-2">How to Play</h2>
+        <p><strong>Move:</strong> W, A, S, D</p>
+        <p><strong>Look:</strong> Mouse</p>
+        <p><strong>Jump:</strong> Space</p>
+        <p><strong>Destroy:</strong> Left Click</p>
+        <p><strong>Place:</strong> Right Click</p>
+        <p><strong>Select Block:</strong> 1-5</p>
+        <p><strong>E:</strong> Interact with NPC</p>
+        <p><strong>ESC:</strong> Release mouse</p>
+    </div>
+
+    <div id="interaction-prompt" class="rounded-lg">Press E to Interact</div>
+
+    <div id="toolbar"></div>
+
+    <div id="dialogue-box">
+        <h3 class="text-2xl font-bold">NPC Dialogue ✨</h3>
+        <div id="dialogue-content"></div>
+        <div id="dialogue-loading-indicator">Generating response...</div>
+        <div id="dialogue-input-container">
+            <input type="text" id="dialogue-input" placeholder="Ask something or say hello...">
+            <button id="dialogue-send-button" class="shadow-lg">Send</button>
+        </div>
+        <button id="dialogue-close-button" class="self-end shadow-lg">Close</button>
+    </div>
+
+    <!-- Main game script -->
+    <script>
+        // Game Setup
+        let scene, camera, renderer;
+        const world = {};
+        const chunks = {};
+        const chunkSize = 16;
+        const renderDistance = 8;
+        const simplex = new SimplexNoise();
+
+        // Player state
+        const player = {
+            height: 1.8,
+            speed: 5,
+            jumpHeight: 8,
+            velocity: new THREE.Vector3(),
+            onGround: false,
+            canMove: true // Control player movement during dialogue
+        };
+        const keyboard = {};
+
+        // Block Interaction
+        let raycaster;
+        let rollOverMesh, rollOverMaterial;
+        let selectedBlockType; // This will be set in init()
+
+        let blockTypes; // Declared with 'let' for assignment in init()
+        let toolbarBlocks; // Declared with 'let' for assignment in init()
+
+        // NPC variables
+        let npcMesh;
+        const npcInteractionDistance = 5; // Distance to interact with NPC
+        let isDialogueOpen = false;
+        let chatHistory = []; // For Gemini API conversation history
+
+        // Elements
+        const interactionPrompt = document.getElementById('interaction-prompt');
+        const dialogueBox = document.getElementById('dialogue-box');
+        const dialogueContent = document.getElementById('dialogue-content');
+        const dialogueInput = document.getElementById('dialogue-input');
+        const dialogueSendButton = document.getElementById('dialogue-send-button');
+        const dialogueCloseButton = document.getElementById('dialogue-close-button');
+        const dialogueLoadingIndicator = document.getElementById('dialogue-loading-indicator');
+
+        // Moved init() and animate() call inside window.onload
+        window.onload = function() {
+            init();
+            animate();
+        };
+
+
+        // --- CORE INITIALIZATION ---
+        function init() {
+            // Define blockTypes and toolbarBlocks here to ensure THREE is fully loaded
+            blockTypes = {
+                'dirt': { color: 0x8B4513, texture: createBlockTexture('#8B4513', '#A0522D') },
+                'grass': { color: 0x00ff00, texture: createBlockTexture('#3A5F0B', '#556B2F', '#8B4513') },
+                'stone': { color: 0x808080, texture: createBlockTexture('#808080', '#A9A9A9') },
+                'log': { color: 0x654321, texture: createBlockTexture('#654321', '#835C3B', '#5C4033', true) },
+                'leaves': { color: 0x228B22, texture: createBlockTexture('#228B22', '#556B2F', null, false, 0.7) }
+            };
+
+            toolbarBlocks = ['grass', 'dirt', 'stone', 'log', 'leaves'];
+            selectedBlockType = 'grass'; // Set a default selected block
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.Fog(0x87ceeb, 0, renderDistance * chunkSize);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.y = 30; // Player starts at Y=30, terrain is typically below Y=20
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xcccccc);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 200, 100);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // --- Debugging: Add a simple red cube to see if anything renders ---
+            const geometry = new THREE.BoxGeometry( 1, 1, 1 );
+            const material = new THREE.MeshBasicMaterial( { color: 0xff0000 } );
+            const cube = new THREE.Mesh( geometry, material );
+            cube.position.set(0, 10, 0); // Position it clearly in front of the camera
+            scene.add( cube );
+            console.log("Added a red test cube at (0, 10, 0). If you see this, rendering is working.");
+            // --- End Debugging ---
+
+            // Add NPC
+            addNPC();
+
+            // Controls & UI
+            setupControls();
+            setupUI();
+            setupDialogueListeners();
+
+            // Raycaster for block interaction
+            raycaster = new THREE.Raycaster();
+
+            // Roll-over helper
+            const rollOverGeo = new THREE.BoxGeometry(1.01, 1.01, 1.01);
+            rollOverMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true });
+            rollOverMesh = new THREE.Mesh(rollOverGeo, rollOverMaterial);
+            scene.add(rollOverMesh);
+
+            // Initial world generation
+            generateInitialWorld();
+
+            window.addEventListener('resize', onWindowResize, false);
+            // Confirm BufferGeometryUtils is loaded globally
+            console.log("THREE.BufferGeometryUtils:", typeof THREE.BufferGeometryUtils !== 'undefined' ? THREE.BufferGeometryUtils : "Not Loaded"); 
+        }
+
+        function setupControls() {
+            const blocker = document.getElementById('blocker');
+            const instructions = document.getElementById('instructions');
+
+            document.addEventListener('click', () => {
+                if(document.pointerLockElement !== renderer.domElement && !isDialogueOpen){
+                     renderer.domElement.requestPointerLock();
+                }
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if (document.pointerLockElement === renderer.domElement) {
+                    blocker.style.display = 'none';
+                    player.canMove = true;
+                } else {
+                    blocker.style.display = 'flex';
+                    player.canMove = false;
+                }
+            });
+            
+            document.addEventListener('keydown', (e) => {
+                keyboard[e.code] = true;
+                if (e.code === 'KeyE' && !isDialogueOpen) {
+                    checkNPCInteraction();
+                }
+            });
+            document.addEventListener('keyup', (e) => keyboard[e.code] = false);
+
+            document.addEventListener('mousemove', (event) => {
+                if (document.pointerLockElement === renderer.domElement && player.canMove) {
+                    camera.rotation.y -= event.movementX * 0.002;
+                    camera.rotation.x -= event.movementY * 0.002;
+                    camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+                }
+            });
+            
+            document.addEventListener('mousedown', (event) => {
+                if (document.pointerLockElement !== renderer.domElement || isDialogueOpen) return;
+                if (event.button === 0) { // Left click
+                    destroyBlock();
+                } else if (event.button === 2) { // Right click
+                    placeBlock();
+                }
+            });
+        }
+        
+        function setupUI() {
+            const toolbar = document.getElementById('toolbar');
+            toolbar.innerHTML = ''; // Clear existing toolbar in case of re-initialization
+            toolbarBlocks.forEach((type, index) => {
+                const slot = document.createElement('div');
+                slot.classList.add('toolbar-slot');
+                if (index === 0) slot.classList.add('active');
+                slot.dataset.blockType = type;
+                slot.style.backgroundImage = `url(${blockTypes[type].texture.texture.image.toDataURL()})`; 
+
+                slot.addEventListener('click', () => {
+                    selectBlock(type);
+                });
+                toolbar.appendChild(slot);
+            });
+
+            window.addEventListener('keydown', (e) => {
+                if (e.code.startsWith('Digit')) {
+                    const index = parseInt(e.code.slice(5)) - 1;
+                    if (index >= 0 && index < toolbarBlocks.length) {
+                        selectBlock(toolbarBlocks[index]);
+                    }
+                }
+            });
+        }
+
+        function selectBlock(type) {
+            selectedBlockType = type;
+            document.querySelectorAll('.toolbar-slot').forEach(slot => {
+                slot.classList.toggle('active', slot.dataset.blockType === type);
+            });
+        }
+
+        function createBlockTexture(color, highlight, topColor = null, isLog = false, opacity = 1.0) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 16;
+            canvas.height = 16;
+            const context = canvas.getContext('2d');
+
+            context.fillStyle = color;
+            context.fillRect(0, 0, 16, 16);
+
+            context.strokeStyle = 'rgba(0,0,0,0.2)';
+            context.lineWidth = 1;
+            context.strokeRect(0.5, 0.5, 15, 15);
+
+            context.fillStyle = highlight;
+            for(let i = 0; i < 20; i++){
+                context.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
+            }
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestFilter;
+            texture.colorSpace = THREE.SRGBColorSpace;
+            
+            let topTexture = texture;
+            if (topColor) {
+                 const topCanvas = document.createElement('canvas');
+                 topCanvas.width = 16;
+                 topCanvas.height = 16;
+                 const topContext = topCanvas.getContext('2d');
+                 topContext.fillStyle = topColor;
+                 topContext.fillRect(0, 0, 16, 16);
+                 topContext.fillStyle = highlight;
+                 for(let i = 0; i < 20; i++){
+                     topContext.fillRect(Math.random() * 16, Math.random() * 16, 2, 2);
+                 }
+                 topTexture = new THREE.CanvasTexture(topCanvas);
+                 topTexture.magFilter = THREE.NearestFilter;
+                 topTexture.minFilter = THREE.NearestFilter;
+                 topTexture.colorSpace = THREE.SRGBColorSpace;
+            }
+            
+            let sideTexture = texture;
+            if (isLog){
+                 const sideCanvas = document.createElement('canvas');
+                 sideCanvas.width = 16;
+                 sideCanvas.height = 16;
+                 const sideContext = sideCanvas.getContext('2d');
+                 sideContext.fillStyle = color;
+                 sideContext.fillRect(0, 0, 16, 16);
+                 sideContext.strokeStyle = 'rgba(0,0,0,0.4)';
+                 sideContext.lineWidth = 2;
+                 for(let y = 0; y < 16; y+=4) {
+                    sideContext.beginPath();
+                    sideContext.moveTo(0, y + Math.random()*2-1);
+                    sideContext.bezierCurveTo(5, y + Math.random()*2-1, 11, y + Math.random()*2-1, 16, y + Math.random()*2-1);
+                    sideContext.stroke();
+                 }
+                 sideTexture = new THREE.CanvasTexture(sideCanvas);
+                 sideTexture.magFilter = THREE.NearestFilter;
+                 sideTexture.minFilter = THREE.NearestFilter;
+                 texture.colorSpace = THREE.SRGBColorSpace; // Corrected: should be on sideTexture as well
+            }
+
+
+            const material = [
+                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity }), // right
+                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity }), // left
+                new THREE.MeshLambertMaterial({ map: topTexture, transparent: opacity < 1.0, opacity: opacity }), // top
+                new THREE.MeshLambertMaterial({ map: texture, transparent: opacity < 1.0, opacity: opacity }), // bottom
+                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity }), // front
+                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity })  // back
+            ];
+
+
+            return { texture, material };
+        }
+
+        // --- WORLD GENERATION ---
+        function generateChunk(chunkX, chunkZ) {
+            const chunkId = `${chunkX},${chunkZ}`;
+            if (chunks[chunkId]) return;
+
+            console.log(`Generating chunk: ${chunkId}`); // Log chunk generation
+            const chunkData = new Uint8Array(chunkSize * chunkSize * chunkSize);
+            
+            for (let x = 0; x < chunkSize; x++) {
+                for (let z = 0; z < chunkSize; z++) {
+                    const worldX = chunkX * chunkSize + x;
+                    const worldZ = chunkZ * chunkSize + z;
+
+                    const height = Math.floor(simplex.noise2D(worldX / 50, worldZ / 50) * 10) + 10;
+                    
+                    for (let y = 0; y < chunkSize; y++) {
+                         if (y < height) {
+                            let blockType;
+                            if (y === height - 1) blockType = 'grass';
+                            else if (y > height - 4) blockType = 'dirt';
+                            else blockType = 'stone';
+                            setBlock(chunkData, x, y, z, toolbarBlocks.indexOf(blockType) + 1);
+                         }
+                         if(y === height && Math.random() < 0.02) { // Add trees
+                             generateTree(chunkData, x, y, z);
+                         }
+                    }
+                }
+            }
+            
+            const chunkMesh = createChunkMesh(chunkData);
+            if (chunkMesh) { // Only add if mesh was successfully created
+                chunkMesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize);
+                scene.add(chunkMesh);
+                chunks[chunkId] = {
+                    data: chunkData,
+                    mesh: chunkMesh,
+                };
+                console.log(`Chunk ${chunkId} mesh added to scene.`);
+            } else {
+                console.warn(`Chunk ${chunkId} mesh was not created or was empty.`);
+            }
+        }
+        
+        function generateTree(chunkData, x, y, z) {
+            const treeHeight = 4 + Math.floor(Math.random() * 3);
+            for(let i=0; i<treeHeight; i++){
+                setBlock(chunkData, x, y+i, z, toolbarBlocks.indexOf('log') + 1);
+            }
+            
+            const leavesRadius = 2;
+            for(let ly = y + treeHeight - 2; ly < y + treeHeight + 2; ly++){
+                for(let lx = x - leavesRadius; lx <= x + leavesRadius; lx++){
+                    for(let lz = z - leavesRadius; lz <= z + leavesRadius; lz++){
+                        const dist = Math.sqrt((lx-x)**2 + (ly-(y+treeHeight-1))**2 + (lz-z)**2);
+                        if(dist < leavesRadius + 0.5 && getBlock(chunkData, lx, ly, lz) === 0){
+                           setBlock(chunkData, lx, ly, lz, toolbarBlocks.indexOf('leaves') + 1);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function getBlock(chunkData, x, y, z) {
+            if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize) {
+                return 0; // Air
+            }
+            return chunkData[y * chunkSize * chunkSize + z * chunkSize + x];
+        }
+
+        function setBlock(chunkData, x, y, z, type) {
+            if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize) {
+                return;
+            }
+            chunkData[y * chunkSize * chunkSize + z * chunkSize + x] = type;
+        }
+
+        function createChunkMesh(chunkData) {
+            const geometries = {};
+            toolbarBlocks.forEach(type => {
+                geometries[type] = [];
+            });
+            const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+            
+            let totalFacesAdded = 0; // Debugging count
+            for (let y = 0; y < chunkSize; y++) {
+                for (let z = 0; z < chunkSize; z++) {
+                    for (let x = 0; x < chunkSize; x++) {
+                        const blockTypeIndex = getBlock(chunkData, x, y, z);
+                        if (blockTypeIndex === 0) continue; // Air
+
+                        const blockTypeName = toolbarBlocks[blockTypeIndex - 1];
+
+                        // Check neighbors for culling
+                        if (getBlock(chunkData, x + 1, y, z) === 0 ||
+                            getBlock(chunkData, x - 1, y, z) === 0 ||
+                            getBlock(chunkData, x, y + 1, z) === 0 ||
+                            getBlock(chunkData, x, y - 1, z) === 0 ||
+                            getBlock(chunkData, x, y, z + 1) === 0 ||
+                            getBlock(chunkData, x, y, z - 1) === 0) 
+                        {
+                            const matrix = new THREE.Matrix4();
+                            matrix.makeTranslation(x, y, z);
+                            const newGeo = cubeGeo.clone();
+                            newGeo.applyMatrix4(matrix);
+                            geometries[blockTypeName].push(newGeo);
+                            totalFacesAdded++;
+                        }
+                    }
+                }
+            }
+            console.log(`createChunkMesh: Total faces considered for merging: ${totalFacesAdded}`);
+
+            const chunkGroup = new THREE.Group();
+            for(const type in geometries) {
+                if(geometries[type].length > 0) {
+                    console.log(`Attempting to merge ${geometries[type].length} geometries for block type: ${type}`);
+                    // Now BufferGeometryUtils should be available on THREE
+                    const mergedGeo = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries[type]); 
+                    if(mergedGeo) {
+                        console.log(`Successfully merged geometries for block type: ${type}`);
+                        const material = blockTypes[type].texture.material;
+                        const mesh = new THREE.Mesh(mergedGeo, material);
+                        mesh.castShadow = true;
+                        mesh.receiveShadow = true;
+                        chunkGroup.add(mesh);
+                    } else {
+                        console.warn(`mergeBufferGeometries returned null for type: ${type}`);
+                    }
+                }
+            }
+            
+            cubeGeo.dispose(); // Dispose of the temporary geometry
+            if (chunkGroup.children.length === 0 && totalFacesAdded > 0) {
+                console.warn("Chunk group is empty even though faces were added. Possible merging issue.");
+                return null; // Return null if no meshes were added to the group
+            } else if (chunkGroup.children.length === 0) {
+                 console.log("No exposed faces in this chunk, returning empty chunk group.");
+                 return null; // Return null if no meshes were added to the group
+            }
+            return chunkGroup;
+        }
+        
+        function generateInitialWorld() {
+            // Position player at a reasonable height above ground
+            camera.position.set(0, 30, 0); 
+            updateChunks();
+        }
+
+        function updateChunks() {
+            const playerChunkX = Math.floor(camera.position.x / chunkSize);
+            const playerChunkZ = Math.floor(camera.position.z / chunkSize);
+
+            for (let x = playerChunkX - renderDistance; x <= playerChunkX + renderDistance; x++) {
+                for (let z = playerChunkZ - renderDistance; z <= playerChunkZ + renderDistance; z++) {
+                    generateChunk(x, z);
+                }
+            }
+            
+            // Unload distant chunks
+            for (const chunkId in chunks) {
+                const [cx, cz] = chunkId.split(',').map(Number);
+                const dx = Math.abs(cx - playerChunkX);
+                const dz = Math.abs(cz - playerChunkZ);
+                if (dx > renderDistance || dz > renderDistance) {
+                    scene.remove(chunks[chunkId].mesh);
+                    chunks[chunkId].mesh.traverse(child => {
+                        if (child.isMesh) {
+                            child.geometry.dispose();
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    });
+                    delete chunks[chunkId];
+                }
+            }
+        }
+        
+        function getWorldBlock(x, y, z) {
+             const chunkX = Math.floor(x / chunkSize);
+             const chunkZ = Math.floor(z / chunkSize);
+             const chunkId = `${chunkX},${chunkZ}`;
+             const chunk = chunks[chunkId];
+
+             if(!chunk) return 0; // Air
+
+             const localX = x - chunkX * chunkSize;
+             const localY = y;
+             const localZ = z - chunkZ * chunkSize;
+
+             return getBlock(chunk.data, localX, localY, localZ);
+        }
+
+        function setWorldBlock(x, y, z, type) {
+            const chunkX = Math.floor(x / chunkSize);
+            const chunkZ = Math.floor(z / chunkSize);
+            const chunkId = `${chunkX},${chunkZ}`;
+            const chunk = chunks[chunkId];
+            
+            if(!chunk) return;
+            
+            const localX = x - chunkX * chunkSize;
+            const localY = y;
+            const localZ = z - chunkZ * chunkSize;
+            
+            setBlock(chunk.data, localX, localY, localZ, type);
+            
+            // Regenerate mesh for this chunk and potentially its neighbors if at a border
+            regenerateChunk(chunkX, chunkZ);
+
+            if (localX === 0) regenerateChunk(chunkX - 1, chunkZ);
+            if (localX === chunkSize - 1) regenerateChunk(chunkX + 1, chunkZ);
+            if (localZ === 0) regenerateChunk(chunkX, chunkZ - 1);
+            if (localZ === chunkSize - 1) regenerateChunk(chunkX, chunkZ + 1);
+        }
+
+        function regenerateChunk(chunkX, chunkZ) {
+             const chunkId = `${chunkX},${chunkZ}`;
+             const chunk = chunks[chunkId];
+             if(!chunk) return;
+
+             scene.remove(chunk.mesh);
+             chunk.mesh.traverse(child => {
+                 if(child.isMesh) {
+                     child.geometry.dispose();
+                     if(Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                     else child.material.dispose();
+                 }
+             });
+             
+             const newMesh = createChunkMesh(chunk.data);
+             if (newMesh) { // Only add if mesh was successfully created
+                newMesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize);
+                scene.add(newMesh);
+                chunk.mesh = newMesh;
+             } else {
+                // If new mesh is null, it means the chunk became empty or couldn't be merged
+                delete chunks[chunkId]; // Remove from active chunks
+             }
+        }
+
+        // --- BLOCK INTERACTION ---
+        function getIntersectedObject() {
+            raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+            // Only intersect with chunk meshes that are currently in the scene
+            const interactiveObjects = Object.values(chunks).map(c => c.mesh);
+            // Also add the NPC to interactive objects
+            if (npcMesh) interactiveObjects.push(npcMesh);
+
+            const intersects = raycaster.intersectObjects(interactiveObjects, true);
+            if (intersects.length > 0) {
+                // Filter out the NPC if it's the closest, so block interaction works
+                if (intersects[0].object === npcMesh) {
+                    return intersects.length > 1 ? intersects[1] : null; // Return next closest if NPC is first
+                }
+                return intersects[0];
+            }
+            return null;
+        }
+
+        function destroyBlock() {
+            const intersect = getIntersectedObject();
+            if (intersect && intersect.distance < 6) {
+                const pos = new THREE.Vector3().copy(intersect.point).sub(intersect.face.normal.multiplyScalar(0.5));
+                const blockPos = {
+                    x: Math.floor(pos.x),
+                    y: Math.floor(pos.y),
+                    z: Math.floor(pos.z)
+                };
+                setWorldBlock(blockPos.x, blockPos.y, blockPos.z, 0);
+            }
+        }
+
+        function placeBlock() {
+            const intersect = getIntersectedObject();
+            if (intersect && intersect.distance < 6) {
+                const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal.multiplyScalar(0.5));
+                const blockPos = {
+                    x: Math.floor(pos.x),
+                    y: Math.floor(pos.y),
+                    z: Math.floor(pos.z)
+                };
+                
+                // Check if player is inside the block to be placed
+                const playerBox = new THREE.Box3().setFromCenterAndSize(camera.position, new THREE.Vector3(0.8, player.height, 0.8));
+                const blockBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5), new THREE.Vector3(1,1,1));
+                
+                if(!playerBox.intersectsBox(blockBox)){
+                    setWorldBlock(blockPos.x, blockPos.y, blockPos.z, toolbarBlocks.indexOf(selectedBlockType) + 1);
+                }
+            }
+        }
+
+        // --- NPC Logic ---
+        function addNPC() {
+            const npcGeometry = new THREE.BoxGeometry(1, 2, 1); // Simple body
+            const npcMaterial = new THREE.MeshLambertMaterial({ color: 0x8A2BE2 }); // Purple color
+            npcMesh = new THREE.Mesh(npcGeometry, npcMaterial);
+            npcMesh.position.set(0, 10, -5); // Position NPC in the world, adjusted slightly for visibility
+            scene.add(npcMesh);
+
+            // Add a simple head
+            const headGeometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+            const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFFA07A }); // Light orange for skin
+            const headMesh = new THREE.Mesh(headGeometry, headMaterial);
+            headMesh.position.y = 1.4; // Position above the body
+            npcMesh.add(headMesh);
+        }
+
+        function checkNPCInteraction() {
+            if (npcMesh) {
+                const distance = camera.position.distanceTo(npcMesh.position);
+                if (distance < npcInteractionDistance) {
+                    interactionPrompt.style.display = 'block';
+                } else {
+                    interactionPrompt.style.display = 'none';
+                }
+            }
+        }
+
+        function toggleInteractionPrompt() {
+            // This function is now redundant as checkNPCInteraction already handles display
+            // but keeping it for now if other UI elements might use it.
+            // Consider removing this function if not needed elsewhere.
+        }
+
+        function openDialogue() {
+            isDialogueOpen = true;
+            dialogueBox.classList.add('active');
+            player.canMove = false; // Disable player movement
+            if (document.pointerLockElement) {
+                document.exitPointerLock(); // Release pointer lock
+            }
+
+            // Initial greeting from NPC
+            if (chatHistory.length === 0) {
+                appendDialogue('NPC: Hello, traveler! What brings you to these blocky lands?');
+            }
+            dialogueInput.focus();
+        }
+
+        function closeDialogue() {
+            isDialogueOpen = false;
+            dialogueBox.classList.remove('active');
+            player.canMove = true; // Re-enable player movement
+            dialogueContent.innerHTML = ''; // Clear chat history in UI
+            chatHistory = []; // Clear actual chat history
+            // Attempt to re-lock pointer after closing dialogue
+            renderer.domElement.requestPointerLock();
+        }
+
+        function setupDialogueListeners() {
+            dialogueSendButton.addEventListener('click', sendDialogue);
+            dialogueInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    sendDialogue();
+                }
+            });
+            dialogueCloseButton.addEventListener('click', closeDialogue);
+            // Listen for 'E' key press to open dialogue, but only when not already open
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyE' && !isDialogueOpen) {
+                    checkNPCInteraction();
+                }
+            });
+        }
+
+        async function sendDialogue() {
+            const userMessage = dialogueInput.value.trim();
+            if (userMessage === '') return;
+
+            appendDialogue(`You: ${userMessage}`);
+            dialogueInput.value = '';
+            dialogueLoadingIndicator.style.display = 'block';
+            dialogueContent.scrollTop = dialogueContent.scrollHeight; // Scroll to bottom
+
+            chatHistory.push({ role: "user", parts: [{ text: userMessage }] });
+
+            try {
+                const apiKey = ""; // Canvas will automatically provide this
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const payload = {
+                    contents: chatHistory
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                dialogueLoadingIndicator.style.display = 'none';
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const llmResponse = result.candidates[0].content.parts[0].text;
+                    appendDialogue(`NPC: ${llmResponse}`);
+                    chatHistory.push({ role: "model", parts: [{ text: llmResponse }] }); // Store model's response
+                } else {
+                    appendDialogue("NPC: I'm sorry, I couldn't understand that. Could you please rephrase?");
+                    console.error("Gemini API returned an unexpected response structure:", result);
+                }
+            } catch (error) {
+                dialogueLoadingIndicator.style.display = 'none';
+                appendDialogue("NPC: I seem to be disconnected from the world. Please try again later.");
+                console.error("Error calling Gemini API:", error);
+            }
+            dialogueContent.scrollTop = dialogueContent.scrollHeight; // Scroll to bottom again
+        }
+
+        function appendDialogue(message) {
+            const p = document.createElement('p');
+            p.textContent = message;
+            dialogueContent.appendChild(p);
+        }
+
+        // --- GAME LOOP ---
+        let lastTime = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = (time - lastTime) / 1000;
+
+            if (document.pointerLockElement === renderer.domElement && player.canMove) {
+                updatePlayer(delta);
+                updateChunks();
+            }
+            
+            checkNPCInteraction(); // Constantly check and update NPC interaction prompt visibility
+
+            const intersect = getIntersectedObject();
+            if (intersect && intersect.distance < 6 && !isDialogueOpen) { // Only show rollover if not in dialogue
+                rollOverMesh.visible = true;
+                const pos = new THREE.Vector3().copy(intersect.point).sub(intersect.face.normal.multiplyScalar(0.5));
+                rollOverMesh.position.set(Math.floor(pos.x) + 0.5, Math.floor(pos.y) + 0.5, Math.floor(pos.z) + 0.5);
+            } else {
+                rollOverMesh.visible = false;
+            }
+
+            renderer.render(scene, camera);
+            lastTime = time;
+        }
+        
+        function updatePlayer(delta) {
+            // Gravity
+            player.velocity.y -= 9.8 * 2.0 * delta; // a bit stronger gravity
+
+            let moveSpeed = player.speed * delta;
+            let moveDirection = new THREE.Vector3();
+
+            if (keyboard['KeyW']) moveDirection.z = -1;
+            if (keyboard['KeyS']) moveDirection.z = 1;
+            if (keyboard['KeyA']) moveDirection.x = -1;
+            if (keyboard['KeyD']) moveDirection.x = 1;
+            
+            moveDirection.normalize();
+            moveDirection.applyEuler(camera.rotation);
+
+            const moveX = moveDirection.x * moveSpeed;
+            const moveZ = moveDirection.z * moveSpeed;
+            
+            // Collision detection
+            const oldPosition = camera.position.clone();
+
+            camera.position.x += moveX;
+            if(checkCollision()){
+                camera.position.x = oldPosition.x;
+            }
+            camera.position.z += moveZ;
+            if(checkCollision()){
+                camera.position.z = oldPosition.z;
+            }
+
+            camera.position.y += player.velocity.y * delta;
+            if (checkCollision()) {
+                if (player.velocity.y < 0) {
+                    camera.position.y = Math.floor(camera.position.y + player.height) - player.height;
+                    player.onGround = true;
+                }
+                player.velocity.y = 0;
+            } else {
+                player.onGround = false;
+            }
+            
+            if (keyboard['Space'] && player.onGround) {
+                player.velocity.y = player.jumpHeight;
+                player.onGround = false;
+            }
+        }
+        
+        function checkCollision() {
+            const playerBox = new THREE.Box3().setFromCenterAndSize(
+                new THREE.Vector3(camera.position.x, camera.position.y - player.height/2, camera.position.z),
+                new THREE.Vector3(0.6, player.height, 0.6)
+            );
+
+            const minX = Math.floor(playerBox.min.x);
+            const maxX = Math.ceil(playerBox.max.x);
+            const minY = Math.floor(playerBox.min.y);
+            const maxY = Math.ceil(playerBox.max.y);
+            const minZ = Math.floor(playerBox.min.z);
+            const maxZ = Math.ceil(playerBox.max.z);
+
+            for (let x = minX; x < maxX; x++) {
+                for (let y = minY; y < maxY; y++) {
+                    for (let z = minZ; z < maxZ; z++) {
+                        if (getWorldBlock(x, y, z) !== 0) {
+                           const blockBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5), new THREE.Vector3(1,1,1));
+                           if(playerBox.intersectsBox(blockBox)) {
+                               return true;
+                           }
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+    </script>
+</body>
+</html>
