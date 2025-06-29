@@ -3,15 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <!-- Chosen Palette: Earthy Tones -->
-    <!-- Application Structure Plan: A single-screen game experience. The main area is the 3D world canvas. Overlaid UI elements include a crosshair for aiming, a block selection toolbar, and an instructions panel. This structure is chosen for immediate immersion into the game, with essential controls readily accessible, mirroring standard first-person sandbox game conventions for intuitive user interaction. -->
-    <!-- Visualization & Content Choices: The primary visualization is the 3D voxel world itself, rendered using three.js on a Canvas element. The goal is exploration and creation. The core interactions are moving (WASD/Arrow Keys), jumping (Space), destroying blocks (left-click), and placing blocks (right-right-click), and placing blocks (right-click). This directly translates the core "Minecraft-like" concept from the report into a functional application. The world is generated procedurally using a noise algorithm to create interesting, explorable terrain, which is a key mechanic discussed in the source material. Added an LLM-powered NPC for dialogue and story generation, enhancing user engagement by providing dynamic interactions and contextual information within the game world. -->
-    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
     <title>BlockCrafter - Web Voxel Game</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Updated CDN link for BufferGeometryUtils to a version compatible with global THREE -->
-    <script src="https://threejs.org/examples/js/utils/BufferGeometryUtils.js"></script>
+    <script type="module" src="https://threejs.org/examples/js/utils/BufferGeometryUtils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
     <style>
         body {
@@ -30,20 +25,76 @@
             transform: translate(-50%, -50%);
             mix-blend-mode: difference;
             border-radius: 50%;
+            z-index: 10;
         }
         #blocker {
             position: absolute;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(0,0,0,0.8);
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             color: white;
             font-size: 2rem;
             text-align: center;
-            cursor: pointer;
+            z-index: 1000;
+            transition: opacity 0.5s ease-in-out;
         }
+        #blocker.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #title-screen-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-width: 80%;
+        }
+        #loading-screen-content {
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            position: absolute;
+            inset: 0;
+            background-color: rgba(0,0,0,0.7);
+        }
+        #start-button {
+            padding: 18px 40px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.8rem;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+            pointer-events: none; /* Disabled until world loads */
+            opacity: 0.6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: bold;
+        }
+        #start-button.active {
+            background-color: #45a049;
+            transform: translateY(-4px);
+            pointer-events: auto;
+            opacity: 1;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.6);
+        }
+        #start-button:hover.active {
+            background-color: #3e8e41;
+            transform: translateY(-6px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.8);
+        }
+
         #toolbar {
             position: absolute;
             bottom: 20px;
@@ -55,6 +106,7 @@
             padding: 10px;
             border-radius: 10px;
             border: 2px solid rgba(255,255,255,0.4);
+            z-index: 50;
         }
         .toolbar-slot {
             width: 60px;
@@ -72,18 +124,8 @@
         }
         canvas {
             display: block;
-        }
-        #instructions {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(0,0,0,0.5);
-            color: white;
-            padding: 15px;
-            border-radius: 10px;
-            max-width: 300px;
-            font-size: 0.9rem;
-            z-index: 100;
+            width: 100%;
+            height: 100%;
         }
         #interaction-prompt {
             position: absolute;
@@ -148,7 +190,7 @@
         #dialogue-input::placeholder {
             color: rgba(255,255,255,0.6);
         }
-        #dialogue-send-button, #dialogue-close-button {
+        #dialogue-send-button, #dialogue-close-button, #suggest-idea-button {
             padding: 10px 20px;
             border-radius: 8px;
             border: none;
@@ -158,7 +200,7 @@
             font-size: 1rem;
             transition: background-color 0.2s ease, transform 0.1s ease;
         }
-        #dialogue-send-button:hover, #dialogue-close-button:hover {
+        #dialogue-send-button:hover, #dialogue-close-button:hover, #suggest-idea-button:hover {
             background-color: #45a049;
             transform: translateY(-1px);
         }
@@ -179,36 +221,29 @@
 <body>
 
     <div id="blocker">
-        <div>
-            <h1 class="text-4xl font-bold mb-4">BlockCrafter</h1>
-            <p class="text-xl">Click to start</p>
-            <div class="text-sm mt-8 max-w-md mx-auto">
-                <p><strong>Controls:</strong></p>
-                <p><strong>W, A, S, D:</strong> Move</p>
-                <p><strong>Mouse:</strong> Look</p>
-                <p><strong>Space:</strong> Jump</p>
-                <p><strong>Left Click:</strong> Destroy Block</p>
-                <p><strong>Right Click:</strong> Place Block</p>
-                <p><strong>1-5 Keys:</strong> Select Block</p>
-                <p><strong>E:</strong> Interact with NPC</p>
-                <p><strong>ESC:</strong> Release mouse</p>
+        <div id="title-screen-content">
+            <h1 class="text-6xl font-bold mb-4 text-emerald-300 drop-shadow-lg">BlockCrafter</h1>
+            <p class="text-2xl text-gray-200">A Creative Voxel Experience</p>
+            <button id="start-button">Start Game</button>
+            <div class="text-sm mt-8 max-w-md mx-auto text-gray-300">
+                <p class="font-bold text-lg mb-2 text-white">Controls</p>
+                <p><strong>W, A, S, D</strong>: Move</p>
+                <p><strong>Mouse</strong>: Look</p>
+                <p><strong>Space</strong>: Jump</p>
+                <p><strong>Left Click</strong>: Destroy Block</p>
+                <p><strong>Right Click</strong>: Place Block</p>
+                <p><strong>1-5 Keys</strong>: Select Block</p>
+                <p><strong>E</strong>: Interact with NPC</p>
+                <p><strong>ESC</strong>: Release mouse</p>
             </div>
+        </div>
+        <div id="loading-screen-content" class="absolute inset-0 bg-black bg-opacity-70 flex flex-col justify-center items-center">
+            <h2 class="text-4xl text-blue-300 mb-4 animate-pulse">Generating World...</h2>
+            <p class="text-xl text-gray-300">Please wait while we prepare your adventure.</p>
         </div>
     </div>
     
     <div id="crosshair"></div>
-
-    <div id="instructions">
-        <h2 class="font-bold text-lg mb-2">How to Play</h2>
-        <p><strong>Move:</strong> W, A, S, D</p>
-        <p><strong>Look:</strong> Mouse</p>
-        <p><strong>Jump:</strong> Space</p>
-        <p><strong>Destroy:</strong> Left Click</p>
-        <p><strong>Place:</strong> Right Click</p>
-        <p><strong>Select Block:</strong> 1-5</p>
-        <p><strong>E:</strong> Interact with NPC</p>
-        <p><strong>ESC:</strong> Release mouse</p>
-    </div>
 
     <div id="interaction-prompt" class="rounded-lg">Press E to Interact</div>
 
@@ -222,45 +257,53 @@
             <input type="text" id="dialogue-input" placeholder="Ask something or say hello...">
             <button id="dialogue-send-button" class="shadow-lg">Send</button>
         </div>
+        <button id="suggest-idea-button" class="shadow-lg mt-2">Suggest Building Idea ✨</button>
         <button id="dialogue-close-button" class="self-end shadow-lg">Close</button>
     </div>
 
     <!-- Main game script -->
-    <script>
+    <script type="module">
+        // Import BufferGeometryUtils from the module
+        import { BufferGeometryUtils } from 'https://threejs.org/examples/js/utils/BufferGeometryUtils.js';
+
         // Game Setup
         let scene, camera, renderer;
-        const world = {};
-        const chunks = {};
-        const chunkSize = 16;
-        const renderDistance = 8;
-        const simplex = new SimplexNoise();
+        const world = {}; // Stores block data for the entire world
+        const chunks = {}; // Stores Three.js mesh objects for rendered chunks
+        const chunkSize = 16; // Size of each chunk (e.g., 16x16x16 blocks)
+        const renderDistance = 8; // How many chunks out from the player to render
+        const simplex = new SimplexNoise('seed'); // Simplex noise for terrain generation
 
         // Player state
         const player = {
-            height: 1.8,
-            speed: 5,
-            jumpHeight: 8,
-            velocity: new THREE.Vector3(),
-            onGround: false,
-            canMove: true // Control player movement during dialogue
+            height: 1.8, // Player height
+            speed: 5, // Movement speed
+            jumpHeight: 8, // Initial upward velocity for jump
+            velocity: new THREE.Vector3(), // Current velocity (for gravity and movement)
+            onGround: false, // Is the player currently on the ground?
+            canMove: false  // Flag to control player movement based on pointer lock
         };
-        const keyboard = {};
+        const keyboard = {}; // Stores state of pressed keys
 
         // Block Interaction
-        let raycaster;
-        let rollOverMesh, rollOverMaterial;
-        let selectedBlockType; // This will be set in init()
+        let raycaster; // For detecting intersected blocks
+        let rollOverMesh, rollOverMaterial; // Visual indicator for targeted block
+        let selectedBlockType;  // The type of block currently selected for placing
 
-        let blockTypes; // Declared with 'let' for assignment in init()
-        let toolbarBlocks; // Declared with 'let' for assignment in init()
+        let blockTypes;  // Object to store properties of each block type (color, texture)
+        let toolbarBlocks;  // Array of block types available in the toolbar
 
         // NPC variables
-        let npcMesh;
-        const npcInteractionDistance = 5; // Distance to interact with NPC
-        let isDialogueOpen = false;
-        let chatHistory = []; // For Gemini API conversation history
+        let npcMesh; // The 3D model of the NPC
+        const npcInteractionDistance = 5;  // Distance within which player can interact with NPC
+        let isDialogueOpen = false; // Flag to indicate if dialogue box is open
+        let chatHistory = [];  // Stores conversation history for Gemini API
 
-        // Elements
+        // DOM Elements
+        const blocker = document.getElementById('blocker');
+        const titleScreenContent = document.getElementById('title-screen-content');
+        const loadingScreenContent = document.getElementById('loading-screen-content');
+        const startButton = document.getElementById('start-button');
         const interactionPrompt = document.getElementById('interaction-prompt');
         const dialogueBox = document.getElementById('dialogue-box');
         const dialogueContent = document.getElementById('dialogue-content');
@@ -268,169 +311,296 @@
         const dialogueSendButton = document.getElementById('dialogue-send-button');
         const dialogueCloseButton = document.getElementById('dialogue-close-button');
         const dialogueLoadingIndicator = document.getElementById('dialogue-loading-indicator');
+        const suggestIdeaButton = document.getElementById('suggest-idea-button');
 
-        // Moved init() and animate() call inside window.onload
+        // Initialize the game when the window loads
         window.onload = function() {
-            init();
-            animate();
+            init(); // Setup Three.js, controls, UI etc.
+            animate(); // Start the main animation loop immediately
         };
-
 
         // --- CORE INITIALIZATION ---
         function init() {
-            // Define blockTypes and toolbarBlocks here to ensure THREE is fully loaded
+            console.log("init(): Game initialization started.");
+
+            // Define block types and their textures
             blockTypes = {
                 'dirt': { color: 0x8B4513, texture: createBlockTexture('#8B4513', '#A0522D') },
-                'grass': { color: 0x00ff00, texture: createBlockTexture('#3A5F0B', '#556B2F', '#8B4513') },
+                'grass': { color: 0x00ff00, texture: createBlockTexture('#3A5F0B', '#556B2F', '#8B4513', false, 1.0, true) },
                 'stone': { color: 0x808080, texture: createBlockTexture('#808080', '#A9A9A9') },
                 'log': { color: 0x654321, texture: createBlockTexture('#654321', '#835C3B', '#5C4033', true) },
                 'leaves': { color: 0x228B22, texture: createBlockTexture('#228B22', '#556B2F', null, false, 0.7) }
             };
+            console.log("init(): Block types defined.");
 
             toolbarBlocks = ['grass', 'dirt', 'stone', 'log', 'leaves'];
-            selectedBlockType = 'grass'; // Set a default selected block
+            selectedBlockType = 'grass'; // Default selected block
+            console.log("init(): Toolbar blocks and selected block type set.");
 
-            // Scene
+            // Setup Three.js Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb);
-            scene.fog = new THREE.Fog(0x87ceeb, 0, renderDistance * chunkSize);
+            scene.background = new THREE.Color(0x87ceeb); // Sky blue background
+            scene.fog = new THREE.Fog(0x87ceeb, 0, renderDistance * chunkSize); // Fog effect
+            console.log("init(): Scene and fog set up.");
 
-            // Camera
+            // Setup Camera
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.y = 30; // Player starts at Y=30, terrain is typically below Y=20
+            console.log("init(): Camera set up.");
 
-            // Renderer
+            // Setup Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            document.body.appendChild(renderer.domElement);
+            renderer.shadowMap.enabled = true; // Enable shadow mapping
+            document.body.appendChild(renderer.domElement); // Add renderer to DOM
+            console.log("init(): Renderer attached to DOM.");
 
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xcccccc);
+            // Setup Lighting
+            const ambientLight = new THREE.AmbientLight(0xcccccc); // Soft ambient light
             scene.add(ambientLight);
 
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // Sunlight-like light
             directionalLight.position.set(50, 200, 100);
             directionalLight.castShadow = true;
             directionalLight.shadow.mapSize.width = 2048;
             directionalLight.shadow.mapSize.height = 2048;
             scene.add(directionalLight);
+            console.log("init(): Lighting set up.");
 
-            // --- Debugging: Add a simple red cube to see if anything renders ---
-            const geometry = new THREE.BoxGeometry( 1, 1, 1 );
-            const material = new THREE.MeshBasicMaterial( { color: 0xff0000 } );
-            const cube = new THREE.Mesh( geometry, material );
-            cube.position.set(0, 10, 0); // Position it clearly in front of the camera
-            scene.add( cube );
-            console.log("Added a red test cube at (0, 10, 0). If you see this, rendering is working.");
-            // --- End Debugging ---
-
-            // Add NPC
+            // Add NPC to the scene
             addNPC();
+            console.log("init(): NPC added.");
 
-            // Controls & UI
+            // Setup event listeners for controls, UI, and dialogue
             setupControls();
             setupUI();
             setupDialogueListeners();
+            console.log("init(): Controls, UI, and Dialogue listeners set up.");
 
-            // Raycaster for block interaction
+            // Setup Raycaster for block interaction
             raycaster = new THREE.Raycaster();
 
-            // Roll-over helper
+            // Setup Roll-over helper (the outline that appears over blocks)
             const rollOverGeo = new THREE.BoxGeometry(1.01, 1.01, 1.01);
             rollOverMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true });
             rollOverMesh = new THREE.Mesh(rollOverGeo, rollOverMaterial);
             scene.add(rollOverMesh);
+            console.log("init(): Raycaster and rollover mesh set up.");
 
-            // Initial world generation
-            generateInitialWorld();
+            // Setup the title screen and initiate background world generation
+            setupTitleScreen();
+            startWorldGeneration(); // Start world generation as soon as init is done
+            console.log("init(): Title screen and initial world generation initiated.");
 
+            // Add window resize listener
             window.addEventListener('resize', onWindowResize, false);
-            // Confirm BufferGeometryUtils is loaded globally
-            console.log("THREE.BufferGeometryUtils:", typeof THREE.BufferGeometryUtils !== 'undefined' ? THREE.BufferGeometryUtils : "Not Loaded"); 
+            console.log("init(): Window resize listener added. Initialization complete.");
         }
 
-        function setupControls() {
-            const blocker = document.getElementById('blocker');
-            const instructions = document.getElementById('instructions');
-
-            document.addEventListener('click', () => {
-                if(document.pointerLockElement !== renderer.domElement && !isDialogueOpen){
-                     renderer.domElement.requestPointerLock();
+        // Sets up the functionality for the "Start Game" button
+        function setupTitleScreen() {
+            startButton.addEventListener('click', () => {
+                console.log("Start button clicked.");
+                // Only proceed if the button is active (meaning world generation is complete)
+                if (startButton.classList.contains('active')) {
+                    console.log("Start button is active. Requesting pointer lock.");
+                    // Request pointer lock directly. The pointerlockchange event will handle UI updates.
+                    renderer.domElement.requestPointerLock();
+                } else {
+                    console.log("Start button is not active yet (world generation in progress).");
                 }
             });
+        }
 
+        // Handles the asynchronous generation of the game world
+        async function startWorldGeneration() {
+            console.log("startWorldGeneration(): Started.");
+            // Clear all existing chunks from the scene if regenerating the world
+            for (const chunkId in chunks) {
+                if (chunks[chunkId].mesh) {
+                    scene.remove(chunks[chunkId].mesh);
+                    chunks[chunkId].mesh.traverse(child => {
+                        if (child.isMesh) {
+                            child.geometry.dispose();
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    });
+                }
+                delete chunks[chunkId];
+            }
+            console.log("startWorldGeneration(): Existing chunks cleared from scene and memory.");
+
+            // Display the loading screen and disable the start button
+            titleScreenContent.style.display = 'none'; // Hide title screen controls
+            loadingScreenContent.style.display = 'flex'; // Show loading animation
+            startButton.classList.remove('active'); // Disable button during loading
+            startButton.textContent = 'Generating World...'; // Update button text
+            player.canMove = false; // Player cannot move during generation
+            console.log("startWorldGeneration(): Displaying loading screen, disabling start button.");
+
+            // Allow the UI to update visually before starting heavy computation
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Determine player's starting chunk position
+            // Reset player position for a fresh world
+            camera.position.set(0, 30, 0); 
+            const playerChunkX = Math.floor(camera.position.x / chunkSize);
+            const playerChunkZ = Math.floor(camera.position.z / chunkSize);
+            console.log(`startWorldGeneration(): Generating chunks around player at (${playerChunkX}, ${playerChunkZ}).`);
+
+            // Generate chunks within the render distance
+            for (let x = playerChunkX - renderDistance; x <= playerChunkX + renderDistance; x++) {
+                for (let z = playerChunkZ - renderDistance; z <= playerChunkZ + renderDistance; z++) {
+                    await new Promise(resolve => setTimeout(resolve, 5)); // Small delay for smoother loading animation (visual feedback)
+                    generateChunk(x, z);
+                }
+            }
+            console.log("startWorldGeneration(): All initial chunks generated.");
+
+            // Hide loading screen, show title screen, and activate start button
+            loadingScreenContent.style.display = 'none'; // Hide loading animation
+            titleScreenContent.style.display = 'flex'; // Show title screen controls again
+            startButton.classList.add('active'); // Enable the start button
+            startButton.textContent = 'Enter World';
+            console.log("startWorldGeneration(): World generation complete. Start button activated. Ready to play.");
+        }
+
+
+        // Sets up all global control listeners (keyboard, mouse)
+        function setupControls() {
+            console.log("setupControls(): Setting up control listeners.");
+            // Listen for pointer lock state changes
             document.addEventListener('pointerlockchange', () => {
                 if (document.pointerLockElement === renderer.domElement) {
-                    blocker.style.display = 'none';
-                    player.canMove = true;
+                    // Pointer lock acquired: enter game mode
+                    console.log("pointerlockchange: Pointer lock acquired. Hiding blocker, enabling movement.");
+                    blocker.classList.add('hidden'); // Hide the menu blocker
+                    player.canMove = true; // Enable player movement
                 } else {
-                    blocker.style.display = 'flex';
-                    player.canMove = false;
+                    // Pointer lock lost: return to menu mode
+                    console.log("pointerlockchange: Pointer lock lost. Showing blocker, disabling movement.");
+                    blocker.classList.remove('hidden'); // Show the menu blocker
+                    // Only re-initiate world generation if not already in dialogue (which would prevent pointer lock)
+                    if (!isDialogueOpen) {
+                        titleScreenContent.style.display = 'flex';
+                        loadingScreenContent.style.display = 'none'; // Ensure loading screen is hidden
+                        startButton.classList.remove('active'); // Deactivate button
+                        startButton.textContent = 'Start Game'; // Reset button text
+                        player.canMove = false; // Disable player movement
+                        // Re-trigger world generation for a clean state on next play
+                        startWorldGeneration(); 
+                    } else {
+                         // If dialogue is open, player.canMove is already false, and blocker is visible due to dialogue
+                         console.log("pointerlockchange: Pointer lock lost, but dialogue is open. Maintaining dialogue state.");
+                    }
                 }
             });
             
+            // Keyboard event listeners
             document.addEventListener('keydown', (e) => {
-                keyboard[e.code] = true;
-                if (e.code === 'KeyE' && !isDialogueOpen) {
-                    checkNPCInteraction();
+                keyboard[e.code] = true; // Mark key as pressed
+                // If 'E' is pressed, not in dialogue, and player can move (in game)
+                if (e.code === 'KeyE' && !isDialogueOpen && player.canMove) {
+                    const distance = camera.position.distanceTo(npcMesh.position);
+                    if (distance < npcInteractionDistance) {
+                        openDialogue(); // Open NPC dialogue
+                    }
                 }
             });
-            document.addEventListener('keyup', (e) => keyboard[e.code] = false);
+            document.addEventListener('keyup', (e) => keyboard[e.code] = false); // Mark key as released
 
+            // Mouse movement for camera rotation
             document.addEventListener('mousemove', (event) => {
+                // Only rotate camera if pointer is locked and player can move
                 if (document.pointerLockElement === renderer.domElement && player.canMove) {
-                    camera.rotation.y -= event.movementX * 0.002;
-                    camera.rotation.x -= event.movementY * 0.002;
+                    camera.rotation.y -= event.movementX * 0.002; // Yaw
+                    camera.rotation.x -= event.movementY * 0.002; // Pitch
+                    // Clamp pitch to prevent flipping
                     camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
                 }
             });
             
+            // Mouse clicks for block interaction
             document.addEventListener('mousedown', (event) => {
-                if (document.pointerLockElement !== renderer.domElement || isDialogueOpen) return;
-                if (event.button === 0) { // Left click
+                // Only interact if pointer is locked, not in dialogue, and player can move
+                if (document.pointerLockElement !== renderer.domElement || isDialogueOpen || !player.canMove) return;
+                if (event.button === 2) event.preventDefault(); // Prevent right-click context menu
+
+                if (event.button === 0) {  // Left click: Destroy block
                     destroyBlock();
-                } else if (event.button === 2) { // Right click
+                } else if (event.button === 2) {  // Right click: Place block
                     placeBlock();
                 }
             });
+
+            // Prevent browser's default right-click context menu on the canvas
+            renderer.domElement.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+            });
+            console.log("setupControls(): Control listeners attached.");
         }
         
+        // Sets up the toolbar UI elements and their click handlers
         function setupUI() {
+            console.log("setupUI(): Setting up toolbar UI.");
             const toolbar = document.getElementById('toolbar');
-            toolbar.innerHTML = ''; // Clear existing toolbar in case of re-initialization
+            toolbar.innerHTML = '';  // Clear any existing toolbar items
             toolbarBlocks.forEach((type, index) => {
                 const slot = document.createElement('div');
                 slot.classList.add('toolbar-slot');
-                if (index === 0) slot.classList.add('active');
-                slot.dataset.blockType = type;
-                slot.style.backgroundImage = `url(${blockTypes[type].texture.texture.image.toDataURL()})`; 
-
+                if (index === 0) slot.classList.add('active'); // Set first slot as active by default
+                slot.dataset.blockType = type; // Store block type in dataset
+                
+                // Set background image from block texture's canvas DataURL
+                const blockTextureObject = blockTypes[type];
+                if (blockTextureObject && blockTextureObject.texture && blockTextureObject.texture.image) {
+                    if (blockTextureObject.texture.image.complete) {
+                        slot.style.backgroundImage = `url(${blockTextureObject.texture.image.toDataURL()})`;
+                    } else {
+                        // If texture is not yet loaded, wait for it
+                        blockTextureObject.texture.image.onload = () => {
+                            slot.style.backgroundImage = `url(${blockTextureObject.texture.image.toDataURL()})`;
+                        };
+                    }
+                } else {
+                    console.warn(`setupUI(): Missing texture image for block type: ${type}`);
+                }
+                
                 slot.addEventListener('click', () => {
-                    selectBlock(type);
+                    selectBlock(type); // Select block when slot is clicked
                 });
                 toolbar.appendChild(slot);
             });
 
+            // Keyboard shortcuts (1-5 keys) for selecting blocks
             window.addEventListener('keydown', (e) => {
                 if (e.code.startsWith('Digit')) {
-                    const index = parseInt(e.code.slice(5)) - 1;
+                    const index = parseInt(e.code.slice(5)) - 1; // Convert key code to 0-indexed number
                     if (index >= 0 && index < toolbarBlocks.length) {
                         selectBlock(toolbarBlocks[index]);
                     }
                 }
             });
+            console.log("setupUI(): Toolbar UI setup complete.");
         }
 
+        // Changes the currently selected block type
         function selectBlock(type) {
+            console.log(`selectBlock(): Selected block type: ${type}`);
             selectedBlockType = type;
+            // Update active class for visual feedback on toolbar
             document.querySelectorAll('.toolbar-slot').forEach(slot => {
                 slot.classList.toggle('active', slot.dataset.blockType === type);
             });
         }
 
-        function createBlockTexture(color, highlight, topColor = null, isLog = false, opacity = 1.0) {
+        // Generates a canvas texture for a block face with given colors
+        function createBlockTexture(color, highlight, topColor = null, isLog = false, opacity = 1.0, isGrass = false) {
             const canvas = document.createElement('canvas');
             canvas.width = 16;
             canvas.height = 16;
@@ -448,12 +618,12 @@
                 context.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
             }
             
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.magFilter = THREE.NearestFilter;
-            texture.minFilter = THREE.NearestFilter;
-            texture.colorSpace = THREE.SRGBColorSpace;
+            const baseTexture = new THREE.CanvasTexture(canvas);
+            baseTexture.magFilter = THREE.NearestFilter;
+            baseTexture.minFilter = THREE.NearestFilter;
+            baseTexture.colorSpace = THREE.SRGBColorSpace;
             
-            let topTexture = texture;
+            let topTexture = baseTexture;
             if (topColor) {
                  const topCanvas = document.createElement('canvas');
                  topCanvas.width = 16;
@@ -471,7 +641,7 @@
                  topTexture.colorSpace = THREE.SRGBColorSpace;
             }
             
-            let sideTexture = texture;
+            let sideTexture = baseTexture;
             if (isLog){
                  const sideCanvas = document.createElement('canvas');
                  sideCanvas.width = 16;
@@ -490,78 +660,115 @@
                  sideTexture = new THREE.CanvasTexture(sideCanvas);
                  sideTexture.magFilter = THREE.NearestFilter;
                  sideTexture.minFilter = THREE.NearestFilter;
-                 texture.colorSpace = THREE.SRGBColorSpace; // Corrected: should be on sideTexture as well
+                 sideTexture.colorSpace = THREE.SRGBColorSpace;
             }
 
+            let grassSideTexture = sideTexture;
+            if (isGrass) {
+                const grassSideCanvas = document.createElement('canvas');
+                grassSideCanvas.width = 16;
+                grassSideCanvas.height = 16;
+                const grassSideContext = grassSideCanvas.getContext('2d');
 
+                grassSideContext.fillStyle = topColor;
+                grassSideContext.fillRect(0, 0, 16, 6);
+                grassSideContext.fillStyle = highlight;
+                for(let i = 0; i < 10; i++){
+                    grassSideContext.fillRect(Math.random() * 16, Math.random() * 6, 1, 1);
+                }
+
+                grassSideContext.fillStyle = '#8B4513';
+                grassSideContext.fillRect(0, 6, 16, 10);
+                grassSideContext.fillStyle = '#A0522D';
+                for(let i = 0; i < 15; i++){
+                    grassSideContext.fillRect(Math.random() * 16, 6 + Math.random() * 10, 1, 1);
+                }
+
+                grassSideTexture = new THREE.CanvasTexture(grassSideCanvas);
+                grassSideTexture.magFilter = THREE.NearestFilter;
+                grassSideTexture.minFilter = THREE.NearestFilter;
+                grassSideTexture.colorSpace = THREE.SRGBColorSpace;
+            }
+
+            // Return an array of materials for each face of the cube
             const material = [
-                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity }), // right
-                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity }), // left
-                new THREE.MeshLambertMaterial({ map: topTexture, transparent: opacity < 1.0, opacity: opacity }), // top
-                new THREE.MeshLambertMaterial({ map: texture, transparent: opacity < 1.0, opacity: opacity }), // bottom
-                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity }), // front
-                new THREE.MeshLambertMaterial({ map: sideTexture, transparent: opacity < 1.0, opacity: opacity })  // back
+                new THREE.MeshLambertMaterial({ map: isGrass ? grassSideTexture : sideTexture, transparent: opacity < 1.0, opacity: opacity }),  // right face
+                new THREE.MeshLambertMaterial({ map: isGrass ? grassSideTexture : sideTexture, transparent: opacity < 1.0, opacity: opacity }),  // left face
+                new THREE.MeshLambertMaterial({ map: topTexture, transparent: opacity < 1.0, opacity: opacity }),  // top face
+                new THREE.MeshLambertMaterial({ map: baseTexture, transparent: opacity < 1.0, opacity: opacity }),  // bottom face (always dirt for grass)
+                new THREE.MeshLambertMaterial({ map: isGrass ? grassSideTexture : sideTexture, transparent: opacity < 1.0, opacity: opacity }),  // front face
+                new THREE.MeshLambertMaterial({ map: isGrass ? grassSideTexture : sideTexture, transparent: opacity < 1.0, opacity: opacity })    // back face
             ];
 
-
-            return { texture, material };
+            return { texture: baseTexture, material: material }; // Return baseTexture for toolbar, and the array of materials
         }
 
         // --- WORLD GENERATION ---
+        // Generates a single chunk's block data and creates its 3D mesh
         function generateChunk(chunkX, chunkZ) {
             const chunkId = `${chunkX},${chunkZ}`;
-            if (chunks[chunkId]) return;
+            if (chunks[chunkId]) {
+                return; // Chunk already exists, skip generation
+            }
 
-            console.log(`Generating chunk: ${chunkId}`); // Log chunk generation
-            const chunkData = new Uint8Array(chunkSize * chunkSize * chunkSize);
+            const chunkData = new Uint8Array(chunkSize * chunkSize * chunkSize); // Stores block types for this chunk
             
+            // Populate chunk data using Simplex Noise for terrain height
             for (let x = 0; x < chunkSize; x++) {
                 for (let z = 0; z < chunkSize; z++) {
                     const worldX = chunkX * chunkSize + x;
                     const worldZ = chunkZ * chunkSize + z;
 
-                    const height = Math.floor(simplex.noise2D(worldX / 50, worldZ / 50) * 10) + 10;
-                    
+                    // Combine multiple noise layers for more varied terrain
+                    const height1 = simplex.noise2D(worldX / 50, worldZ / 50) * 10;
+                    const height2 = simplex.noise2D(worldX / 20, worldZ / 20) * 5; // Finer details
+                    const height = Math.floor(height1 + height2) + 10; // Base height + noise
+
                     for (let y = 0; y < chunkSize; y++) {
                          if (y < height) {
                             let blockType;
+                            // Assign block types based on height
                             if (y === height - 1) blockType = 'grass';
-                            else if (y > height - 4) blockType = 'dirt';
+                            else if (y >= height - 4) blockType = 'dirt';
                             else blockType = 'stone';
-                            setBlock(chunkData, x, y, z, toolbarBlocks.indexOf(blockType) + 1);
+                            setBlock(chunkData, x, y, z, toolbarBlocks.indexOf(blockType) + 1); // Store block type index
                          }
-                         if(y === height && Math.random() < 0.02) { // Add trees
-                             generateTree(chunkData, x, y, z);
-                         }
+                    }
+                    // Randomly generate trees
+                    if(Math.random() < 0.005) {
+                         generateTree(chunkData, x, height, z);
                     }
                 }
             }
             
-            const chunkMesh = createChunkMesh(chunkData);
-            if (chunkMesh) { // Only add if mesh was successfully created
-                chunkMesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize);
-                scene.add(chunkMesh);
-                chunks[chunkId] = {
+            const chunkMesh = createChunkMesh(chunkData); // Create the 3D mesh for this chunk
+            if (chunkMesh) {
+                chunkMesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize); // Position the mesh
+                scene.add(chunkMesh); // Add to Three.js scene
+                chunks[chunkId] = { // Store chunk data and mesh
                     data: chunkData,
                     mesh: chunkMesh,
                 };
-                console.log(`Chunk ${chunkId} mesh added to scene.`);
             } else {
-                console.warn(`Chunk ${chunkId} mesh was not created or was empty.`);
+                console.warn(`generateChunk(): Chunk ${chunkId} mesh was not created or was empty.`);
             }
         }
         
+        // Generates a tree structure within a chunk
         function generateTree(chunkData, x, y, z) {
-            const treeHeight = 4 + Math.floor(Math.random() * 3);
-            for(let i=0; i<treeHeight; i++){
+            const treeHeight = 4 + Math.floor(Math.random() * 3); // Random tree height
+            // Place log blocks for the trunk
+            for(let i=0; i < treeHeight; i++){
                 setBlock(chunkData, x, y+i, z, toolbarBlocks.indexOf('log') + 1);
             }
             
+            // Place leaves around the top of the trunk
             const leavesRadius = 2;
             for(let ly = y + treeHeight - 2; ly < y + treeHeight + 2; ly++){
                 for(let lx = x - leavesRadius; lx <= x + leavesRadius; lx++){
                     for(let lz = z - leavesRadius; lz <= z + leavesRadius; lz++){
-                        const dist = Math.sqrt((lx-x)**2 + (ly-(y+treeHeight-1))**2 + (lz-z)**2);
+                        const dist = Math.sqrt(Math.pow(lx-x, 2) + Math.pow(ly-(y+treeHeight-1), 2) + Math.pow(lz-z, 2));
+                        // Place leaves if within radius and block is currently air
                         if(dist < leavesRadius + 0.5 && getBlock(chunkData, lx, ly, lz) === 0){
                            setBlock(chunkData, lx, ly, lz, toolbarBlocks.indexOf('leaves') + 1);
                         }
@@ -570,107 +777,107 @@
             }
         }
         
+        // Gets the block type at local chunk coordinates (0 for air)
         function getBlock(chunkData, x, y, z) {
             if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize) {
-                return 0; // Air
+                return 0; // Out of bounds is considered air
             }
             return chunkData[y * chunkSize * chunkSize + z * chunkSize + x];
         }
 
+        // Sets the block type at local chunk coordinates
         function setBlock(chunkData, x, y, z, type) {
             if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize) {
-                return;
+                return; // Do nothing if out of bounds
             }
             chunkData[y * chunkSize * chunkSize + z * chunkSize + x] = type;
         }
 
+        // Creates a merged Three.js mesh for a chunk's visible blocks
         function createChunkMesh(chunkData) {
-            const geometries = {};
+            const geometries = {}; // Stores geometries for each block type
             toolbarBlocks.forEach(type => {
                 geometries[type] = [];
             });
-            const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+            const cubeGeo = new THREE.BoxGeometry(1, 1, 1); // Reusable cube geometry for individual blocks
             
             let totalFacesAdded = 0; // Debugging count
             for (let y = 0; y < chunkSize; y++) {
                 for (let z = 0; z < chunkSize; z++) {
                     for (let x = 0; x < chunkSize; x++) {
                         const blockTypeIndex = getBlock(chunkData, x, y, z);
-                        if (blockTypeIndex === 0) continue; // Air
+                        if (blockTypeIndex === 0) continue; // Skip air blocks
 
-                        const blockTypeName = toolbarBlocks[blockTypeIndex - 1];
+                        const blockTypeName = toolbarBlocks[blockTypeIndex - 1]; // Get block name from index
 
-                        // Check neighbors for culling
-                        if (getBlock(chunkData, x + 1, y, z) === 0 ||
-                            getBlock(chunkData, x - 1, y, z) === 0 ||
-                            getBlock(chunkData, x, y + 1, z) === 0 ||
-                            getBlock(chunkData, x, y - 1, z) === 0 ||
-                            getBlock(chunkData, x, y, z + 1) === 0 ||
-                            getBlock(chunkData, x, y, z - 1) === 0) 
+                        // Check neighbors to determine if a face is visible (simple culling)
+                        if (getBlock(chunkData, x + 1, y, z) === 0 || // Right
+                            getBlock(chunkData, x - 1, y, z) === 0 || // Left
+                            getBlock(chunkData, x, y + 1, z) === 0 || // Top
+                            getBlock(chunkData, x, y - 1, z) === 0 || // Bottom
+                            getBlock(chunkData, x, y, z + 1) === 0 || // Front
+                            getBlock(chunkData, x, y, z - 1) === 0)    // Back
                         {
                             const matrix = new THREE.Matrix4();
-                            matrix.makeTranslation(x, y, z);
+                            matrix.makeTranslation(x, y, z); // Position the cube
                             const newGeo = cubeGeo.clone();
-                            newGeo.applyMatrix4(matrix);
-                            geometries[blockTypeName].push(newGeo);
+                            newGeo.applyMatrix4(matrix); // Apply position to geometry
+                            geometries[blockTypeName].push(newGeo); // Add to array for merging
                             totalFacesAdded++;
                         }
                     }
                 }
             }
-            console.log(`createChunkMesh: Total faces considered for merging: ${totalFacesAdded}`);
 
-            const chunkGroup = new THREE.Group();
+            const chunkGroup = new THREE.Group(); // Group to hold all merged meshes for this chunk
             for(const type in geometries) {
                 if(geometries[type].length > 0) {
-                    console.log(`Attempting to merge ${geometries[type].length} geometries for block type: ${type}`);
-                    // Now BufferGeometryUtils should be available on THREE
-                    const mergedGeo = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries[type]); 
+                    // Merge all geometries of the same block type into a single buffer geometry
+                    const mergedGeo = BufferGeometryUtils.mergeBufferGeometries(geometries[type]); 
                     if(mergedGeo) {
-                        console.log(`Successfully merged geometries for block type: ${type}`);
-                        const material = blockTypes[type].texture.material;
+                        const material = blockTypes[type].texture.material; // Get material for this block type
                         const mesh = new THREE.Mesh(mergedGeo, material);
                         mesh.castShadow = true;
                         mesh.receiveShadow = true;
-                        chunkGroup.add(mesh);
+                        chunkGroup.add(mesh); // Add merged mesh to the chunk group
                     } else {
-                        console.warn(`mergeBufferGeometries returned null for type: ${type}`);
+                         // This warning can happen if mergeBufferGeometries receives an empty array, which should be caught by `geometries[type].length > 0`
+                         // or if there's a problem with BufferGeometryUtils itself.
+                         // console.warn(`createChunkMesh: mergeBufferGeometries returned null for type ${type}.`);
                     }
                 }
             }
             
-            cubeGeo.dispose(); // Dispose of the temporary geometry
+            cubeGeo.dispose(); // Dispose of the temporary cube geometry
+            // If no faces were added but chunkGroup is empty, it means there was an issue or no visible blocks
             if (chunkGroup.children.length === 0 && totalFacesAdded > 0) {
-                console.warn("Chunk group is empty even though faces were added. Possible merging issue.");
-                return null; // Return null if no meshes were added to the group
+                console.warn("createChunkMesh: Chunk group is empty even though faces were added. Possible merging issue.");
+                return null;
             } else if (chunkGroup.children.length === 0) {
-                 console.log("No exposed faces in this chunk, returning empty chunk group.");
-                 return null; // Return null if no meshes were added to the group
+                 // console.log("createChunkMesh: No exposed faces in this chunk, returning null mesh.");
+                 return null; // Return null if the chunk is completely empty or has no visible faces
             }
             return chunkGroup;
         }
         
-        function generateInitialWorld() {
-            // Position player at a reasonable height above ground
-            camera.position.set(0, 30, 0); 
-            updateChunks();
-        }
-
+        // Dynamically loads and unloads chunks based on player position
         function updateChunks() {
             const playerChunkX = Math.floor(camera.position.x / chunkSize);
             const playerChunkZ = Math.floor(camera.position.z / chunkSize);
 
+            // Generate new chunks around the player
             for (let x = playerChunkX - renderDistance; x <= playerChunkX + renderDistance; x++) {
                 for (let z = playerChunkZ - renderDistance; z <= playerChunkZ + renderDistance; z++) {
                     generateChunk(x, z);
                 }
             }
             
-            // Unload distant chunks
+            // Unload distant chunks to save memory and performance
             for (const chunkId in chunks) {
                 const [cx, cz] = chunkId.split(',').map(Number);
                 const dx = Math.abs(cx - playerChunkX);
                 const dz = Math.abs(cz - playerChunkZ);
+                // If chunk is outside render distance, remove it
                 if (dx > renderDistance || dz > renderDistance) {
                     scene.remove(chunks[chunkId].mesh);
                     chunks[chunkId].mesh.traverse(child => {
@@ -688,104 +895,141 @@
             }
         }
         
+        // Gets the block type at global world coordinates
         function getWorldBlock(x, y, z) {
-             const chunkX = Math.floor(x / chunkSize);
-             const chunkZ = Math.floor(z / chunkSize);
-             const chunkId = `${chunkX},${chunkZ}`;
-             const chunk = chunks[chunkId];
-
-             if(!chunk) return 0; // Air
-
-             const localX = x - chunkX * chunkSize;
-             const localY = y;
-             const localZ = z - chunkZ * chunkSize;
-
-             return getBlock(chunk.data, localX, localY, localZ);
-        }
-
-        function setWorldBlock(x, y, z, type) {
             const chunkX = Math.floor(x / chunkSize);
             const chunkZ = Math.floor(z / chunkSize);
             const chunkId = `${chunkX},${chunkZ}`;
             const chunk = chunks[chunkId];
-            
-            if(!chunk) return;
-            
+
+            if(!chunk) return 0; // If chunk doesn't exist, assume air
+
+            const localX = x - chunkX * chunkSize;
+            const localY = y;
+            const localZ = z - chunkZ * chunkSize;
+
+            return getBlock(chunk.data, localX, localY, localZ);
+        }
+
+        // Sets the block type at global world coordinates, and triggers chunk regeneration
+        function setWorldBlock(x, y, z, type) {
+            console.log(`setWorldBlock(): Setting block at (${x},${y},${z}) to type ${type}.`);
+            const chunkX = Math.floor(x / chunkSize);
+            const chunkZ = Math.floor(z / chunkSize);
+            const chunkId = `${chunkX},${chunkZ}`;
+            let chunk = chunks[chunkId];
+
+            // If the target chunk doesn't exist, generate it first
+            if (!chunk) {
+                console.log(`setWorldBlock(): Chunk ${chunkId} not found, generating.`);
+                generateChunk(chunkX, chunkZ);
+                chunk = chunks[chunkId];
+                if (!chunk) {
+                    console.warn(`setWorldBlock(): Failed to generate chunk ${chunkId} for block placement.`);
+                    return; // Cannot set block if chunk couldn't be generated
+                }
+            }
+
             const localX = x - chunkX * chunkSize;
             const localY = y;
             const localZ = z - chunkZ * chunkSize;
             
             setBlock(chunk.data, localX, localY, localZ, type);
             
-            // Regenerate mesh for this chunk and potentially its neighbors if at a border
+            // Regenerate the chunk where the block was changed
             regenerateChunk(chunkX, chunkZ);
 
+            // Also regenerate neighboring chunks if the block change was at a chunk border,
+            // as it affects their visible faces (culling)
             if (localX === 0) regenerateChunk(chunkX - 1, chunkZ);
             if (localX === chunkSize - 1) regenerateChunk(chunkX + 1, chunkZ);
             if (localZ === 0) regenerateChunk(chunkX, chunkZ - 1);
             if (localZ === chunkSize - 1) regenerateChunk(chunkX, chunkZ + 1);
         }
 
+        // Recreates and replaces the 3D mesh for a specific chunk
         function regenerateChunk(chunkX, chunkZ) {
-             const chunkId = `${chunkX},${chunkZ}`;
-             const chunk = chunks[chunkId];
-             if(!chunk) return;
+            const chunkId = `${chunkX},${chunkZ}`;
+            const chunk = chunks[chunkId];
+            if(!chunk) {
+                return; // Nothing to regenerate if chunk doesn't exist
+            }
+            console.log(`regenerateChunk(): Regenerating chunk ${chunkId}.`);
 
-             scene.remove(chunk.mesh);
-             chunk.mesh.traverse(child => {
-                 if(child.isMesh) {
-                     child.geometry.dispose();
-                     if(Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-                     else child.material.dispose();
-                 }
-             });
-             
-             const newMesh = createChunkMesh(chunk.data);
-             if (newMesh) { // Only add if mesh was successfully created
+            // Remove old mesh from scene and dispose its resources
+            scene.remove(chunk.mesh);
+            chunk.mesh.traverse(child => {
+                if(child.isMesh) {
+                    child.geometry.dispose();
+                    if(Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                    else child.material.dispose();
+                }
+            });
+            
+            // Create new mesh from updated chunk data
+            const newMesh = createChunkMesh(chunk.data);
+            if (newMesh) {
                 newMesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize);
                 scene.add(newMesh);
-                chunk.mesh = newMesh;
-             } else {
-                // If new mesh is null, it means the chunk became empty or couldn't be merged
-                delete chunks[chunkId]; // Remove from active chunks
-             }
+                chunk.mesh = newMesh; // Update reference to new mesh
+                console.log(`regenerateChunk(): New mesh for chunk ${chunkId} added.`);
+            } else {
+                console.warn(`regenerateChunk(): New mesh for chunk ${chunkId} was null (empty chunk?). Deleting chunk entry.`);
+                delete chunks[chunkId]; // Remove chunk from map if it became empty
+            }
         }
 
         // --- BLOCK INTERACTION ---
+        // Uses raycasting to find the first intersected 3D object
         function getIntersectedObject() {
             raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-            // Only intersect with chunk meshes that are currently in the scene
+            // Collect all chunk meshes and NPC for intersection testing
             const interactiveObjects = Object.values(chunks).map(c => c.mesh);
-            // Also add the NPC to interactive objects
             if (npcMesh) interactiveObjects.push(npcMesh);
 
             const intersects = raycaster.intersectObjects(interactiveObjects, true);
             if (intersects.length > 0) {
-                // Filter out the NPC if it's the closest, so block interaction works
-                if (intersects[0].object === npcMesh) {
-                    return intersects.length > 1 ? intersects[1] : null; // Return next closest if NPC is first
+                // Filter out NPC for block interaction, unless it's the only thing hit
+                const blockIntersects = intersects.filter(i => i.object !== npcMesh);
+                if (blockIntersects.length > 0) {
+                    return blockIntersects[0];
                 }
-                return intersects[0];
+                // If only NPC is intersected and we are not in dialogue mode, don't return it for block interaction
+                if (intersects[0].object === npcMesh && !isDialogueOpen) {
+                    return null;
+                }
+                return intersects[0]; // Return the NPC if it's the only intersection and relevant
             }
-            return null;
+            return null; // No intersection
         }
 
+        // Handles destroying a block when left-clicked
         function destroyBlock() {
+            console.log("destroyBlock(): Attempting to destroy block.");
             const intersect = getIntersectedObject();
+            // Check if an object was intersected and it's within interaction distance
             if (intersect && intersect.distance < 6) {
+                // Calculate block position: move half a block back along the normal to get the block's center
                 const pos = new THREE.Vector3().copy(intersect.point).sub(intersect.face.normal.multiplyScalar(0.5));
                 const blockPos = {
                     x: Math.floor(pos.x),
                     y: Math.floor(pos.y),
                     z: Math.floor(pos.z)
                 };
-                setWorldBlock(blockPos.x, blockPos.y, blockPos.z, 0);
+                setWorldBlock(blockPos.x, blockPos.y, blockPos.z, 0); // Set block type to 0 (air)
+                console.log(`destroyBlock(): Block destroyed at ${blockPos.x}, ${blockPos.y}, ${blockPos.z}`);
+            } else {
+                console.log("destroyBlock(): No block intersected or too far.");
             }
         }
 
+        // Handles placing a block when right-clicked
         function placeBlock() {
+            console.log("placeBlock(): Attempting to place block.");
             const intersect = getIntersectedObject();
+            // Check if an object was intersected and it's within interaction distance
             if (intersect && intersect.distance < 6) {
+                // Calculate block position: move half a block forward along the normal to place next to it
                 const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal.multiplyScalar(0.5));
                 const blockPos = {
                     x: Math.floor(pos.x),
@@ -793,74 +1037,90 @@
                     z: Math.floor(pos.z)
                 };
                 
-                // Check if player is inside the block to be placed
-                const playerBox = new THREE.Box3().setFromCenterAndSize(camera.position, new THREE.Vector3(0.8, player.height, 0.8));
+                // Create a temporary bounding box for the player for collision check
+                const playerBox = new THREE.Box3().setFromCenterAndSize(
+                    new THREE.Vector3(camera.position.x, camera.position.y - player.height / 2, camera.position.z),
+                    new THREE.Vector3(0.6, player.height, 0.6)
+                );
+                // Create a bounding box for the new block being placed
                 const blockBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5), new THREE.Vector3(1,1,1));
                 
+                // Only place block if it doesn't intersect with the player's current position
                 if(!playerBox.intersectsBox(blockBox)){
                     setWorldBlock(blockPos.x, blockPos.y, blockPos.z, toolbarBlocks.indexOf(selectedBlockType) + 1);
+                    console.log(`placeBlock(): Block placed at ${blockPos.x}, ${blockPos.y}, ${blockPos.z} of type ${selectedBlockType}`);
+                } else {
+                    console.log("placeBlock(): Cannot place block, player is inside target block area.");
                 }
+            } else {
+                console.log("placeBlock(): No valid intersection for placing block.");
             }
         }
 
         // --- NPC Logic ---
+        // Adds a simple NPC model to the scene
         function addNPC() {
-            const npcGeometry = new THREE.BoxGeometry(1, 2, 1); // Simple body
-            const npcMaterial = new THREE.MeshLambertMaterial({ color: 0x8A2BE2 }); // Purple color
+            console.log("addNPC(): Adding NPC to scene.");
+            const npcGeometry = new THREE.BoxGeometry(1, 2, 1);
+            const npcMaterial = new THREE.MeshLambertMaterial({ color: 0x8A2BE2 });
             npcMesh = new THREE.Mesh(npcGeometry, npcMaterial);
-            npcMesh.position.set(0, 10, -5); // Position NPC in the world, adjusted slightly for visibility
+            npcMesh.position.set(0, 10, -5); // Position the NPC
             scene.add(npcMesh);
 
-            // Add a simple head
             const headGeometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
-            const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFFA07A }); // Light orange for skin
+            const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFFA07A });
             const headMesh = new THREE.Mesh(headGeometry, headMaterial);
-            headMesh.position.y = 1.4; // Position above the body
+            headMesh.position.y = 1.4; // Position head relative to body
             npcMesh.add(headMesh);
+            console.log("addNPC(): NPC added successfully.");
         }
 
+        // Checks if player is close enough to interact with NPC and shows prompt
         function checkNPCInteraction() {
-            if (npcMesh) {
+            if (npcMesh && !isDialogueOpen) {
                 const distance = camera.position.distanceTo(npcMesh.position);
                 if (distance < npcInteractionDistance) {
                     interactionPrompt.style.display = 'block';
                 } else {
                     interactionPrompt.style.display = 'none';
                 }
+            } else if (isDialogueOpen) {
+                interactionPrompt.style.display = 'none';
             }
         }
 
-        function toggleInteractionPrompt() {
-            // This function is now redundant as checkNPCInteraction already handles display
-            // but keeping it for now if other UI elements might use it.
-            // Consider removing this function if not needed elsewhere.
-        }
-
+        // Opens the NPC dialogue box
         function openDialogue() {
+            console.log("openDialogue(): Opening dialogue box.");
             isDialogueOpen = true;
             dialogueBox.classList.add('active');
-            player.canMove = false; // Disable player movement
+            player.canMove = false; // Disable player movement while in dialogue
             if (document.pointerLockElement) {
                 document.exitPointerLock(); // Release pointer lock
             }
 
-            // Initial greeting from NPC
+            // Display initial greeting if it's a new conversation
             if (chatHistory.length === 0) {
                 appendDialogue('NPC: Hello, traveler! What brings you to these blocky lands?');
             }
-            dialogueInput.focus();
+            dialogueInput.focus(); // Focus on the input field
         }
 
+        // Closes the NPC dialogue box
         function closeDialogue() {
+            console.log("closeDialogue(): Closing dialogue box.");
             isDialogueOpen = false;
             dialogueBox.classList.remove('active');
             player.canMove = true; // Re-enable player movement
-            dialogueContent.innerHTML = ''; // Clear chat history in UI
-            chatHistory = []; // Clear actual chat history
+            dialogueContent.innerHTML = ''; // Clear chat display
+            chatHistory = []; // Clear chat history
             // Attempt to re-lock pointer after closing dialogue
-            renderer.domElement.requestPointerLock();
+            if (document.pointerLockElement === null) {
+                renderer.domElement.requestPointerLock();
+            }
         }
 
+        // Sets up event listeners for dialogue box buttons and input
         function setupDialogueListeners() {
             dialogueSendButton.addEventListener('click', sendDialogue);
             dialogueInput.addEventListener('keydown', (e) => {
@@ -869,14 +1129,10 @@
                 }
             });
             dialogueCloseButton.addEventListener('click', closeDialogue);
-            // Listen for 'E' key press to open dialogue, but only when not already open
-            document.addEventListener('keydown', (e) => {
-                if (e.code === 'KeyE' && !isDialogueOpen) {
-                    checkNPCInteraction();
-                }
-            });
+            suggestIdeaButton.addEventListener('click', suggestBuildingIdea); // Listener for new idea button
         }
 
+        // Sends player's message to Gemini API and displays NPC response
         async function sendDialogue() {
             const userMessage = dialogueInput.value.trim();
             if (userMessage === '') return;
@@ -886,7 +1142,7 @@
             dialogueLoadingIndicator.style.display = 'block';
             dialogueContent.scrollTop = dialogueContent.scrollHeight; // Scroll to bottom
 
-            chatHistory.push({ role: "user", parts: [{ text: userMessage }] });
+            chatHistory.push({ role: "user", parts: [{ text: userMessage }] }); // Add to conversation history
 
             try {
                 const apiKey = ""; // Canvas will automatically provide this
@@ -913,16 +1169,59 @@
                     chatHistory.push({ role: "model", parts: [{ text: llmResponse }] }); // Store model's response
                 } else {
                     appendDialogue("NPC: I'm sorry, I couldn't understand that. Could you please rephrase?");
-                    console.error("Gemini API returned an unexpected response structure:", result);
                 }
             } catch (error) {
                 dialogueLoadingIndicator.style.display = 'none';
                 appendDialogue("NPC: I seem to be disconnected from the world. Please try again later.");
-                console.error("Error calling Gemini API:", error);
             }
             dialogueContent.scrollTop = dialogueContent.scrollHeight; // Scroll to bottom again
         }
 
+        // Prompts Gemini API for a building idea based on available blocks
+        async function suggestBuildingIdea() {
+            appendDialogue(`NPC: Let me think...`);
+            dialogueLoadingIndicator.style.display = 'block';
+            dialogueContent.scrollTop = dialogueContent.scrollHeight;
+
+            const availableBlocks = toolbarBlocks.join(', '); // Get list of available blocks
+            const prompt = `You are a creative architect and world-builder in a voxel game. Given the available block types: ${availableBlocks}, suggest a creative and inspiring structure or object the player can build. Keep your suggestion concise and imaginative, focusing on the visual and functional aspects.`;
+
+            // Create a fresh chat history for this specific idea generation prompt
+            let ideaChatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+
+            try {
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const payload = {
+                    contents: ideaChatHistory
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                dialogueLoadingIndicator.style.display = 'none';
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const llmResponse = result.candidates[0].content.parts[0].text;
+                    appendDialogue(`NPC: How about this idea for you: ${llmResponse}`);
+                } else {
+                    appendDialogue("NPC: My creative circuits seem a bit jammed. Try asking me again!");
+                }
+            } catch (error) {
+                dialogueLoadingIndicator.style.display = 'none';
+                appendDialogue("NPC: I can't think of anything right now. Perhaps later?");
+            }
+            dialogueContent.scrollTop = dialogueContent.scrollHeight;
+        }
+
+        // Appends a new message to the dialogue box display
         function appendDialogue(message) {
             const p = document.createElement('p');
             p.textContent = message;
@@ -930,86 +1229,118 @@
         }
 
         // --- GAME LOOP ---
-        let lastTime = performance.now();
+        let lastTime = performance.now(); // Stores time of last frame for delta calculation
         function animate() {
-            requestAnimationFrame(animate);
+            requestAnimationFrame(animate); // Request next frame
 
             const time = performance.now();
-            const delta = (time - lastTime) / 1000;
+            const delta = (time - lastTime) / 1000; // Time elapsed since last frame in seconds
 
+            // Only update player and chunks if pointer is locked and player movement is enabled
             if (document.pointerLockElement === renderer.domElement && player.canMove) {
-                updatePlayer(delta);
-                updateChunks();
+                updatePlayer(delta); // Update player position and physics
+                updateChunks(); // Manage chunk loading/unloading
+            } else if (document.pointerLockElement !== renderer.domElement && player.canMove) {
+                // Fallback: if player.canMove is true but pointer lock is lost, correct the state
+                player.canMove = false;
+                console.log("animate(): Player movement disabled due to detected pointer lock discrepancy. State corrected.");
             }
             
-            checkNPCInteraction(); // Constantly check and update NPC interaction prompt visibility
+            checkNPCInteraction(); // Update NPC interaction prompt visibility
 
-            const intersect = getIntersectedObject();
-            if (intersect && intersect.distance < 6 && !isDialogueOpen) { // Only show rollover if not in dialogue
+            const intersect = getIntersectedObject(); // Get currently targeted object
+            // Show roll-over mesh if a block (not NPC) is targeted within range and dialogue is not open
+            if (intersect && intersect.object !== npcMesh && intersect.distance < 6 && !isDialogueOpen) {
                 rollOverMesh.visible = true;
+                // Position roll-over mesh on the targeted block
                 const pos = new THREE.Vector3().copy(intersect.point).sub(intersect.face.normal.multiplyScalar(0.5));
                 rollOverMesh.position.set(Math.floor(pos.x) + 0.5, Math.floor(pos.y) + 0.5, Math.floor(pos.z) + 0.5);
             } else {
-                rollOverMesh.visible = false;
+                rollOverMesh.visible = false; // Hide roll-over mesh
             }
 
-            renderer.render(scene, camera);
-            lastTime = time;
+            renderer.render(scene, camera); // Render the scene
+            lastTime = time; // Update last frame time
         }
         
+        // Updates player's position, applies gravity, and handles collisions
         function updatePlayer(delta) {
-            // Gravity
-            player.velocity.y -= 9.8 * 2.0 * delta; // a bit stronger gravity
+            // Apply gravity to vertical velocity
+            player.velocity.y -= 9.8 * 2.0 * delta; // Gravity constant * a multiplier for faster fall
 
-            let moveSpeed = player.speed * delta;
-            let moveDirection = new THREE.Vector3();
+            let moveSpeed = player.speed * delta; // Calculate movement distance for this frame
+            let moveDirection = new THREE.Vector3(); // Vector for player input direction
 
+            // Determine input direction based on keyboard state
             if (keyboard['KeyW']) moveDirection.z = -1;
             if (keyboard['KeyS']) moveDirection.z = 1;
             if (keyboard['KeyA']) moveDirection.x = -1;
             if (keyboard['KeyD']) moveDirection.x = 1;
             
-            moveDirection.normalize();
-            moveDirection.applyEuler(camera.rotation);
+            // Normalize movement direction to prevent faster diagonal movement
+            if (moveDirection.lengthSq() > 0) {
+                moveDirection.normalize();
+            }
 
+            // Apply camera's yaw (horizontal rotation) to movement direction
+            const cameraYaw = new THREE.Euler(0, camera.rotation.y, 0, 'XYZ');
+            moveDirection.applyEuler(cameraYaw);
+
+            // Calculate movement components for X and Z axes
             const moveX = moveDirection.x * moveSpeed;
             const moveZ = moveDirection.z * moveSpeed;
             
-            // Collision detection
-            const oldPosition = camera.position.clone();
+            const oldPosition = camera.position.clone(); // Store current position for collision rollback
 
+            // Apply movement and check for collisions for X-axis
             camera.position.x += moveX;
             if(checkCollision()){
-                camera.position.x = oldPosition.x;
-            }
-            camera.position.z += moveZ;
-            if(checkCollision()){
-                camera.position.z = oldPosition.z;
+                camera.position.x = oldPosition.x; // Rollback if collision
+                player.velocity.x = 0; // Stop horizontal velocity
             }
 
+            // Apply movement and check for collisions for Z-axis
+            camera.position.z += moveZ;
+            if(checkCollision()){
+                camera.position.z = oldPosition.z; // Rollback if collision
+                player.velocity.z = 0; // Stop horizontal velocity
+            }
+
+            // Apply vertical movement and check for collisions (Y-axis)
             camera.position.y += player.velocity.y * delta;
             if (checkCollision()) {
-                if (player.velocity.y < 0) {
-                    camera.position.y = Math.floor(camera.position.y + player.height) - player.height;
-                    player.onGround = true;
+                if (player.velocity.y < 0) { // If player is falling and hits ground
+                    // Move player just on top of the collided block
+                    const playerFeetY = camera.position.y - player.height / 2;
+                    const blockY = Math.floor(playerFeetY); // The Y coordinate of the block below
+                    camera.position.y = blockY + 1 + (player.height / 2) + 0.01; // Position on top of the block + small epsilon
+                    player.onGround = true; // Mark player as on ground
+                } else if (player.velocity.y > 0) { // If player is jumping and hits ceiling
+                    camera.position.y = oldPosition.y; // Rollback to prevent getting stuck in ceiling
                 }
-                player.velocity.y = 0;
+                player.velocity.y = 0; // Stop vertical velocity on collision
             } else {
-                player.onGround = false;
+                player.onGround = false; // Player is in the air
             }
             
+            // Handle jumping input
             if (keyboard['Space'] && player.onGround) {
-                player.velocity.y = player.jumpHeight;
-                player.onGround = false;
+                player.velocity.y = player.jumpHeight; // Apply upward velocity
+                player.onGround = false; // Player is now in the air
             }
         }
         
+        // Checks for collision between player's bounding box and world blocks
         function checkCollision() {
+            // Player's bounding box for collision detection
+            // Center is at camera.position.x, camera.position.y - (player.height / 2), camera.position.z
+            // Size is 0.6 for width/depth and player.height * 0.9 for height (slightly smaller to prevent edge-sticking)
             const playerBox = new THREE.Box3().setFromCenterAndSize(
-                new THREE.Vector3(camera.position.x, camera.position.y - player.height/2, camera.position.z),
-                new THREE.Vector3(0.6, player.height, 0.6)
+                new THREE.Vector3(camera.position.x, camera.position.y - player.height / 2, camera.position.z),
+                new THREE.Vector3(0.6, player.height * 0.9, 0.6)
             );
 
+            // Determine the range of world blocks to check for collision with the player's bounding box
             const minX = Math.floor(playerBox.min.x);
             const maxX = Math.ceil(playerBox.max.x);
             const minY = Math.floor(playerBox.min.y);
@@ -1017,21 +1348,25 @@
             const minZ = Math.floor(playerBox.min.z);
             const maxZ = Math.ceil(playerBox.max.z);
 
+            // Iterate over all potentially intersecting blocks
             for (let x = minX; x < maxX; x++) {
                 for (let y = minY; y < maxY; y++) {
                     for (let z = minZ; z < maxZ; z++) {
-                        if (getWorldBlock(x, y, z) !== 0) {
+                        if (getWorldBlock(x, y, z) !== 0) { // If it's a solid block (not air)
+                           // Create a bounding box for the current world block
                            const blockBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5), new THREE.Vector3(1,1,1));
+                           // Check for intersection between player and block
                            if(playerBox.intersectsBox(blockBox)) {
-                               return true;
+                               return true; // Collision detected
                            }
                         }
                     }
                 }
             }
-            return false;
+            return false; // No collision detected
         }
 
+        // Handles window resizing to keep the renderer and camera aspect ratio correct
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
